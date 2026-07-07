@@ -1,0 +1,71 @@
+{% extends "base.html" %} {% block title %}المحادثات{% endblock %} {% block
+content %}
+<div class="page-title">💬 المحادثات</div>
+<div class="page-sub">
+  عرض كل حساب Telegram مع سجله الكامل من الرسائل والردود
+</div>
+
+<div class="card" style="margin-bottom: 20px">
+  <div class="card-header">المستخدمون</div>
+  <table>
+    <thead>
+      <tr>
+        <th>المعرف</th>
+        <th>الاسم</th>
+        <th>المستخدم</th>
+        <th>آخر تحديث</th>
+        <th>فتح</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for conversation in conversations %}
+      <tr>
+        <td>{{ conversation.telegram_id }}</td>
+        <td>
+          {{ conversation.first_name or "—" }} {{ conversation.last_name or ""
+          }}
+        </td>
+        <td>{{ conversation.username or "—" }}</td>
+        <td>
+          {{ conversation.updated_at.strftime('%Y-%m-%d %H:%M') if
+          conversation.updated_at else "—" }}
+        </td>
+        <td>
+          <a
+            href="/conversations?telegram_id={{ conversation.telegram_id }}"
+            class="btn btn-primary btn-sm"
+            >عرض</a
+          >
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="empty">لا توجد محادثات بعد</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if selected %}
+<div class="card">
+  <div class="card-header">سجل المحادثة: {{ selected.telegram_id }}</div>
+  <div style="padding: 12px 16px">
+    <div class="chat-container">
+      {% for msg in messages|reverse %}
+      <div
+        class="chat-message {% if msg.direction == 'inbound' %}inbound{% else %}outbound{% endif %}"
+      >
+        <div>{{ msg.content or '—' }}</div>
+        <div class="chat-meta">
+          {{ msg.created_at.strftime('%Y-%m-%d %H:%M') }} · {{ 'وارد' if
+          msg.direction == 'inbound' else 'صادر' }}
+        </div>
+      </div>
+      {% else %}
+      <div class="empty">لا توجد رسائل مسجلة لهذا الحساب.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %} {% endblock %}

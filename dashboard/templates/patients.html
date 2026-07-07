@@ -1,0 +1,55 @@
+{% extends "base.html" %} {% block title %}المرضى{% endblock %} {% block content
+%}
+<div class="page-title">👥 المرضى</div>
+<div class="page-sub">البحث عن المرضى وسجلهم</div>
+
+<form
+  method="get"
+  style="margin-bottom: 16px; display: flex; gap: 10px; align-items: center"
+>
+  <input
+    name="q"
+    value="{{ query }}"
+    placeholder="ابحث باسم المريض"
+    style="
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+    "
+  />
+  <button class="btn btn-primary" type="submit">بحث</button>
+</form>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>الاسم</th>
+        <th>التليغرام</th>
+        <th>تاريخ الإنشاء</th>
+        <th>عدد المواعيد</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for patient in patients %}
+      <tr>
+        <td>{{ patient.name or '—' }}</td>
+        <td>{{ patient.telegram_id }}</td>
+        <td>
+          {{ patient.created_at.strftime('%Y-%m-%d') if patient.created_at else
+          '—' }}
+        </td>
+        <td>{{ patient.appointments|length }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="empty">لا توجد نتائج</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}السجلات{% endblock %}
+
+{% block content %}
+<div class="page-title">📋 سجل الرسائل</div>
+<div class="page-sub">آخر 200 رسالة</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>الوقت</th>
+        <th>المستخدم</th>
+        <th>الاتجاه</th>
+        <th>النوع</th>
+        <th>المحتوى</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:0.78rem">
+          {{ log.created_at.strftime("%H:%M:%S") }}
+        </td>
+        <td style="font-size:0.8rem">{{ log.telegram_id }}</td>
+        <td>
+          {% if log.direction == "inbound" %}
+            <span style="color:var(--accent)">↓ وارد</span>
+          {% else %}
+            <span style="color:var(--p3)">↑ صادر</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if log.message_type == "voice" %}
+            🎙️ صوت
+          {% else %}
+            💬 نص
+          {% endif %}
+        </td>
+        <td style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="{{ log.content }}">
+          {{ log.content }}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="empty">لا توجد سجلات</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}الرئيسية{% endblock %}
+
+{% block content %}
+<div class="page-title">لوحة التحكم الرئيسية</div>
+<div class="page-sub">{{ today }} <span id="live-dot"></span> يتحدث تلقائياً</div>
+
+<!-- Metric cards -->
+<div class="metrics">
+  <div class="metric">
+    <div class="label">إجمالي مواعيد اليوم</div>
+    <div class="value">{{ stats.total }}</div>
+  </div>
+  <div class="metric p1">
+    <div class="label">🔴 عاجل (P1)</div>
+    <div class="value">{{ stats.P1 }}</div>
+  </div>
+  <div class="metric p2">
+    <div class="label">🟡 متوسط (P2)</div>
+    <div class="value">{{ stats.P2 }}</div>
+  </div>
+  <div class="metric p3">
+    <div class="label">🟢 روتيني (P3)</div>
+    <div class="value">{{ stats.P3 }}</div>
+  </div>
+  <div class="metric">
+    <div class="label">✅ مكتملون</div>
+    <div class="value">{{ stats.completed }}</div>
+  </div>
+  <div class="metric">
+    <div class="label">❌ غياب</div>
+    <div class="value">{{ stats.no_show }}</div>
+  </div>
+</div>
+
+<!-- Live appointment queue -->
+<div class="card">
+  <div class="card-header">
+    📋 قائمة الانتظار — اليوم
+    <span style="font-size:0.78rem; color:var(--muted)">يتحدث كل 20 ثانية</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>الوقت</th>
+        <th>المريض</th>
+        <th>التخصص</th>
+        <th>الأولوية</th>
+        <th>الحالة</th>
+        <th>إجراء</th>
+      </tr>
+    </thead>
+    <tbody id="queue-tbody">
+      {% for a in appointments %}
+      <tr>
+        <td>{{ a.appt_datetime.strftime("%H:%M") if a.appt_datetime else "—" }}</td>
+        <td>{{ a.patient.name if a.patient else "—" }}</td>
+        <td>{{ a.specialty or "—" }}</td>
+        <td>
+          <span class="badge badge-{{ a.priority_class }}">
+            {% if a.priority_class == "P1" %}🔴 عاجل
+            {% elif a.priority_class == "P2" %}🟡 متوسط
+            {% else %}🟢 روتيني{% endif %}
+          </span>
+        </td>
+        <td class="status-{{ a.status }}">
+          {% if a.status == "confirmed" %}مؤكد
+          {% elif a.status == "completed" %}مكتمل
+          {% elif a.status == "no_show" %}غياب
+          {% else %}ملغي{% endif %}
+        </td>
+        <td>
+          <button class="btn btn-primary btn-sm"
+            onclick="setStatus('{{ a.appt_id }}','completed')">✓ حضر</button>
+          <button class="btn btn-sm" style="background:#333;color:#fff;margin-right:4px"
+            onclick="setStatus('{{ a.appt_id }}','no_show')">✗ غاب</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty">لا توجد مواعيد اليوم</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

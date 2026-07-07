@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}ClinicAI{% endblock %} — لوحة التحكم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #f4f7fb;
+        --surface: #ffffff;
+        --border: #dce4ee;
+        --text: #111827;
+        --muted: #64748b;
+        --accent: #2563eb;
+        --p1: #dc2626;
+        --p2: #ca8a04;
+        --p3: #16a34a;
+        --radius: 10px;
+        --font: "Cairo", sans-serif;
+      }
+
+      body {
+        background: linear-gradient(135deg, #f8fbff 0%, #f4f7fb 100%);
+        color: var(--text);
+        font-family: var(--font);
+        min-height: 100vh;
+        display: flex;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        width: 220px;
+        min-height: 100vh;
+        background: #ffffff;
+        border-left: 1px solid var(--border);
+        padding: 24px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        position: fixed;
+        right: 0;
+        top: 0;
+        box-shadow: -6px 0 24px rgba(15, 23, 42, 0.06);
+      }
+      .sidebar h1 {
+        font-size: 1.1rem;
+        color: var(--accent);
+        margin-bottom: 16px;
+      }
+      .sidebar a {
+        display: block;
+        padding: 10px 14px;
+        border-radius: var(--radius);
+        color: #1f2937;
+        text-decoration: none;
+        font-size: 0.9rem;
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+      .sidebar a:hover,
+      .sidebar a.active {
+        background: #e8f0ff;
+        color: var(--accent);
+      }
+
+      /* ── Main content ── */
+      .main {
+        margin-right: 220px;
+        padding: 28px 32px;
+        flex: 1;
+        min-width: 0;
+      }
+      .page-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .page-sub {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-bottom: 24px;
+      }
+
+      /* ── Metric cards ── */
+      .metrics {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 28px;
+      }
+      .metric {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 18px 22px;
+        min-width: 140px;
+        flex: 1;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+      }
+      .metric .label {
+        color: var(--muted);
+        font-size: 0.78rem;
+        margin-bottom: 6px;
+      }
+      .metric .value {
+        font-size: 1.9rem;
+        font-weight: 700;
+      }
+      .metric.p1 .value {
+        color: var(--p1);
+      }
+      .metric.p2 .value {
+        color: var(--p2);
+      }
+      .metric.p3 .value {
+        color: var(--p3);
+      }
+
+      /* ── Table ── */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+      }
+      .card-header {
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        font-weight: 600;
+        font-size: 0.95rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th {
+        background: #f8fafc;
+        padding: 10px 16px;
+        font-size: 0.78rem;
+        color: var(--muted);
+        font-weight: 600;
+        text-align: right;
+        border-bottom: 1px solid var(--border);
+      }
+      td {
+        padding: 12px 16px;
+        font-size: 0.88rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr:hover td {
+        background: #f8fbff;
+      }
+
+      /* ── Priority badges ── */
+      .badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .badge-P1 {
+        background: rgba(255, 77, 77, 0.15);
+        color: var(--p1);
+      }
+      .badge-P2 {
+        background: rgba(245, 197, 66, 0.15);
+        color: var(--p2);
+      }
+      .badge-P3 {
+        background: rgba(76, 175, 80, 0.15);
+        color: var(--p3);
+      }
+
+      /* ── Status badges ── */
+      .status-confirmed {
+        color: var(--accent);
+      }
+      .status-completed {
+        color: var(--p3);
+      }
+      .status-no_show {
+        color: var(--p1);
+      }
+      .status-cancelled {
+        color: var(--muted);
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        padding: 7px 16px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-family: var(--font);
+        font-size: 0.82rem;
+        font-weight: 600;
+        transition: opacity 0.15s;
+      }
+      .btn:hover {
+        opacity: 0.85;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-sm {
+        padding: 4px 10px;
+        font-size: 0.75rem;
+        background: #eff6ff;
+        color: var(--accent);
+      }
+
+      /* ── Nav date ── */
+      .date-nav {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .date-nav a {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 0.85rem;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .date-nav span {
+        font-weight: 600;
+      }
+
+      /* ── Empty state ── */
+      .empty {
+        text-align: center;
+        padding: 48px;
+        color: var(--muted);
+      }
+
+      /* ── Refresh dot ── */
+      #live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--p3);
+        display: inline-block;
+        margin-left: 6px;
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+      /* ── Chat / conversation styles ── */
+      .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 8px 12px;
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+      .chat-message {
+        max-width: 78%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        font-size: 0.95rem;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
+      }
+      .chat-message.inbound {
+        align-self: flex-end;
+        background: #dcfce7; /* light green */
+        color: var(--text);
+        border-bottom-right-radius: 6px;
+      }
+      .chat-message.outbound {
+        align-self: flex-start;
+        background: var(--surface);
+        color: var(--text);
+        border-bottom-left-radius: 6px;
+      }
+      .chat-meta {
+        font-size: 0.72rem;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <nav class="sidebar">
+      <h1>🏥 ClinicAI</h1>
+      <a href="/" class="{% if request.url.path == '/' %}active{% endif %}"
+        >🏠 الرئيسية</a
+      >
+      <a
+        href="/appointments"
+        class="{% if '/appointments' in request.url.path %}active{% endif %}"
+        >📅 المواعيد</a
+      >
+      <a
+        href="/sessions"
+        class="{% if '/sessions' in request.url.path %}active{% endif %}"
+        >🩺 الجلسات</a
+      >
+      <a
+        href="/patients"
+        class="{% if '/patients' in request.url.path %}active{% endif %}"
+        >👥 المرضى</a
+      >
+      <a
+        href="/logs"
+        class="{% if '/logs' in request.url.path %}active{% endif %}"
+        >📋 السجلات</a
+      >
+      <a
+        href="/conversations"
+        class="{% if '/conversations' in request.url.path %}active{% endif %}"
+        >💬 المحادثات</a
+      >
+    </nav>
+
+    <main class="main">{% block content %}{% endblock %}</main>
+
+    <!-- Auto-refresh queue every 20 seconds without full page reload -->
+    <script>
+      async function refreshQueue() {
+        const tbody = document.getElementById("queue-tbody");
+        if (!tbody) return;
+        const res = await fetch("/api/queue/today");
+        const data = await res.json();
+        tbody.innerHTML =
+          data
+            .map(
+              (a) => `
+      <tr>
+        <td>${a.time}</td>
+        <td>${a.patient_name}</td>
+        <td>${a.specialty || "—"}</td>
+        <td><span class="badge badge-${a.priority_class}">${
+          a.priority_class === "P1"
+            ? "🔴 عاجل"
+            : a.priority_class === "P2"
+              ? "🟡 متوسط"
+              : "🟢 روتيني"
+        }</span></td>
+        <td class="status-${a.status}">${
+          a.status === "confirmed"
+            ? "مؤكد"
+            : a.status === "completed"
+              ? "مكتمل"
+              : a.status === "no_show"
+                ? "غياب"
+                : a.status === "cancelled"
+                  ? "ملغي"
+                  : a.status
+        }</td>
+        <td>
+          <button class="btn btn-primary btn-sm"
+            onclick="setStatus('${a.appt_id}','completed')">✓ حضر</button>
+          <button class="btn btn-sm" style="background:#333;color:#fff;margin-right:4px"
+            onclick="setStatus('${a.appt_id}','no_show')">✗ غاب</button>
+        </td>
+      </tr>`,
+            )
+            .join("") ||
+          '<tr><td colspan="6" class="empty">لا توجد مواعيد</td></tr>';
+      }
+
+      async function setStatus(apptId, status) {
+        await fetch(`/api/appointment/${apptId}/status?status=${status}`, {
+          method: "POST",
+        });
+        refreshQueue();
+      }
+
+      setInterval(refreshQueue, 20000);
+    </script>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

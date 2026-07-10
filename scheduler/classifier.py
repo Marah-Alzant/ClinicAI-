@@ -5,73 +5,97 @@ Maps a patient's complaint + stated symptoms → correct specialty/clinic.
 Uses a layered approach: keyword rules first, Gemini fallback for ambiguous cases.
 """
 import re
+import logging
 from typing import Optional
+from nlp.normalizer import normalize
 
-
+logger = logging.getLogger(__name__)
 # ── Specialty routing rules ────────────────────────────────────────────────────
 # Each entry: pattern (regex on normalized Arabic) → specialty key
 ROUTING_RULES: list[tuple[str, str]] = [
-    # Cardiology
-    (r"ألم صدر|وجع صدر|ضغط على الصدر|ضغط دم|شريان|قلب|نبض|تخطيط قلب|إيكو", "cardiology"),
-    # Neurology
-    (r"صداع شديد|دوخة|شلل|رعشة|تنميل|أعصاب|إغماء|تشنج|صرع", "neurology"),
-    # Endocrinology
-    (r"سكر|سكري|هرمون|غدة درقية|غدد|هرمونات|تعب زيادة عن العادي", "endocrinology"),
-    # Orthopedics
-    (r"كسر|مفاصل|ركبة|ظهر|عمود فقري|عظام|التواء|وتر|عضلة", "orthopedics"),
-    # Gynecology
-    (r"نساء|حمل|ولادة|دورة شهرية|رحم|مبيض|حضانة|مهبل", "gynecology"),
-    # Pediatrics
-    (r"طفل|رضيع|أطفال|ولد صغير|بنت صغيرة|حديث الولادة", "pediatrics"),
-    # Ophthalmology
-    (r"عين|نظر|بصر|ضباب|احمرار عين|قرنية|نظارة", "ophthalmology"),
-    # Dermatology
-    (r"جلد|حساسية جلد|بقع|أكزيما|صدفية|حبوب|طفح", "dermatology"),
-    # Dentistry
-    (r"أسنان|ضرس|لثة|تسوس|جذر|تقويم|أسنان اصطناعية", "dentistry"),
-    # Respiratory
-    (r"رئة|تنفس|ربو|كحة مزمنة|بلغم|التهاب رئة", "pulmonology"),
-    # Gastroenterology
-    (r"معدة|أمعاء|هضم|إسهال|إمساك|قولون|بواسير|كبد", "gastroenterology"),
-    # ENT
-    (r"أذن|حلق|أنف|لوزتين|جيوب أنفية|سمع|صوت", "ent"),
-    # Psychiatry
-    (r"اكتئاب|قلق|وسواس|نوم|نفسي|ضغط نفسي|مزاج", "psychiatry"),
-    # General fallback
-    (r"حمى|زكام|كحة|إرهاق|وهن|فحص عام|كشف روتيني", "general_practice"),
+    # Neurology — acute neuro symptoms (not mild dizziness alone)
+    (
+        r"صداع شديد|شلل|رعشه|تنميل|اعصاب|اغماء|تشنج|صرع|"
+        r"ضعف مفاجئ|صعوبه نطق|تشوش بالكلام|فقدان توازن|جلطه|سكت[هة]"
+        r"|دوخه شديده|دوخه مع تنميل",
+        "neurology",
+    ),
+    # Orthopedics — musculoskeletal (avoid bare "ظهر")
+    (
+        r"كسر|التواء|عظام|مفاصل|الركبه|الورك|الكتف|"
+        r"الم ظهر|وجع ظهر|الم ركبه|الم مفصل|عمود فقري|"
+        r"\bوتر\b|الم عضله|وقعه|لا يستطيع المشي|لا عم يمشي",
+        "orthopedics",
+    ),
+    # Gynecology — OB/GYN context (avoid bare "نساء")
+    (
+        r"حمل|ولاده|دوره شهريه|الم رحم|الم مبيض|الم بطن للحامل|"
+        r"نزيف رحمي|مشاكل الحمل|عياده نساء|توليد|مهبل",
+        "gynecology",
+    ),
+    # Dermatology — skin-specific (avoid bare "حبوب" / "جلد")
+    (
+        r"طفح جلدي|حكه جلد|حساسيه جلد|اكزيما|صدفيه|بقع جلد|"
+        r"احمرار جلد|التهاب جلد|شرى|قشره جلد",
+        "dermatology",
+    ),
+    # Gastroenterology — GI symptoms
+    (
+        r"الم معده|الم بطن|مغص|اسهال|امساك|قولون|بواسير|كبد|"
+        r"ترجيع|غثيان|حرقه معده|انتفاخ بطن",
+        "gastroenterology",
+    ),
+    # Chronic diseases — program routing (avoid bare "ضغط" → stress)
+    (
+        r"سكري|سكر|انسولين|هبوط سكر|ارتفاع سكر|السكر التراكمي|"
+        r"ضغط الدم|ضغط مرتفع|قراءات ضغط|ادويه الضغط|متابعه الضغط|"
+        r"ربو|كولسترول|دهون|غده درقيه|مرض مزمن|ادويه مزمنه|"
+        r"متابعه السكر|تجديد وصفه|فحص السكر|متابعه مزمنه",
+        "chronic_diseases",
+    ),
+    # Elderly — caregiver / geriatric program
+    (
+        r"جدي|جدتي|والدي المسن|والدتي المسنه|كبار السن|كبير سن|كبيره سن|"
+        r"مسن|مسنه|شيخوخه|خرف|ذاكره|نسيان|اختلاط ادويه|"
+        r"عمره\s*(6\d|7\d|8\d|9\d)|عمرها\s*(6\d|7\d|8\d|9\d)",
+        "elderly",
+    ),
+    # General fallback — routine / mild acute
+    (
+        r"حمى|زكام|كحه خفيفه|ارهاق|وهن|فحص عام|كشف روتيني|"
+        r"اعراض بسيطه|مراجعة عامه",
+        "general_practice",
+    ),
 ]
 
 # ── Human-readable Arabic specialty names ─────────────────────────────────────
 SPECIALTY_NAMES_AR = {
-    "cardiology":        "طب القلب",
     "neurology":         "طب الأعصاب",
-    "endocrinology":     "الغدد الصماء",
     "orthopedics":       "العظام والمفاصل",
     "gynecology":        "النساء والتوليد",
-    "pediatrics":        "طب الأطفال",
-    "ophthalmology":     "طب العيون",
     "dermatology":       "الأمراض الجلدية",
-    "dentistry":         "طب الأسنان",
-    "pulmonology":       "طب الصدر والجهاز التنفسي",
     "gastroenterology":  "الجهاز الهضمي",
-    "ent":               "أنف وأذن وحنجرة",
-    "psychiatry":        "الطب النفسي",
+    "chronic_diseases":  "الأمراض المزمنة",
+    "elderly":           "كبار السن",
     "general_practice":  "الطب العام",
 }
 
+SPECIALTY_KEYS = set(SPECIALTY_NAMES_AR.keys())
 
-def classify_specialty(normalized_text: str) -> dict:
+def classify_specialty(text: str) -> dict:
     """
-    Rule-based classifier. Returns specialty key + Arabic name.
+    Rule-based classifier. Always normalizes input text first.
+    Returns specialty key + Arabic name.
     Returns general_practice if no pattern matches.
     """
+    normalized_text = normalize(text or "")
     for pattern, specialty in ROUTING_RULES:
         if re.search(pattern, normalized_text):
             return {
                 "specialty":    specialty,
                 "specialty_ar": SPECIALTY_NAMES_AR.get(specialty, specialty),
                 "method":       "rule",
-                "confidence":   1.0,
+                "confidence":   0.9,  # realistic confidence for rule match
             }
     return {
         "specialty":    "general_practice",
@@ -80,36 +104,38 @@ def classify_specialty(normalized_text: str) -> dict:
         "confidence":   0.5,
     }
 
-
-async def classify_with_gemini_fallback(
-    normalized_text: str,
-    gemini_client,
-) -> dict:
+async def classify_with_gemini_fallback(text: str, gemini_client,) -> dict:
     """
-    Try rules first. If confidence is low, ask Gemini to classify.
+    Try rules first. If unresolved, ask Gemini and validate response.
     Use this for ambiguous or multi-complaint messages.
     """
-    result = classify_specialty(normalized_text)
+    result = classify_specialty(text)
 
     if result["method"] == "default":
-        # Ask Gemini to classify the specialty
+        normalized_text = normalize(text or "")
         prompt = (
             f"المريض يقول: '{normalized_text}'\n\n"
-            f"بناءً على ما ذكره، ما هو التخصص الطبي الأنسب من هذه الخيارات:\n"
+            f"اختر التخصص الأنسب من هذه المفاتيح فقط:\n"
             + "\n".join(f"- {k}: {v}" for k, v in SPECIALTY_NAMES_AR.items())
-            + "\n\nأجب بمفتاح التخصص الإنجليزي فقط (مثال: cardiology). لا تكتب أي شيء آخر."
+            + "\n\nأجب بمفتاح واحد فقط من القائمة (مثل: cardiology)."
         )
         try:
             gemini_result = await gemini_client.ask(prompt, max_tokens=20)
-            specialty_key = gemini_result.strip().lower().split()[0]
-            if specialty_key in SPECIALTY_NAMES_AR:
+            cleaned = (gemini_result or "").strip().lower()
+            if not cleaned:
+                raise ValueError("Empty response from Gemini")
+            specialty_key = cleaned.split()[0]
+ 
+            if specialty_key in SPECIALTY_KEYS:
                 result = {
                     "specialty":    specialty_key,
                     "specialty_ar": SPECIALTY_NAMES_AR[specialty_key],
                     "method":       "gemini",
                     "confidence":   0.85,
                 }
-        except Exception:
-            pass  # silently keep the rule-based default
+            else:
+                logger.warning("Gemini returned unknown specialty key: %s", gemini_result)
+        except Exception as exc:
+            logger.exception("Gemini fallback failed in classify_with_gemini_fallback: %s", exc)
 
     return result

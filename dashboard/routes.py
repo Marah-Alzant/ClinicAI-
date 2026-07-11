@@ -144,8 +144,10 @@ async def api_queue(db: Session = Depends(get_db_dependency)):
         "appt_id":        a.appt_id,
         "patient_name":   a.patient.name if a.patient else "—",
         "time":           a.appt_datetime.strftime("%H:%M") if a.appt_datetime else "—",
-        "specialty":      a.specialty,
+        "specialty":      a.specialty_ar or a.specialty,
         "priority_class": a.priority_class,
+        "priority_score": a.priority_score,
+        "complaint":      a.complaint_summary,
         "status":         a.status,
     } for a in appts])
 

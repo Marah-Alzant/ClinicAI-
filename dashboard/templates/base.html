@@ -366,13 +366,14 @@
         <td>${a.time}</td>
         <td>${a.patient_name}</td>
         <td>${a.specialty || "—"}</td>
+        <td title="${a.complaint || ""}">${a.complaint || "—"}</td>
         <td><span class="badge badge-${a.priority_class}">${
           a.priority_class === "P1"
             ? "🔴 عاجل"
             : a.priority_class === "P2"
               ? "🟡 متوسط"
               : "🟢 روتيني"
-        }</span></td>
+        }</span>${a.priority_score !== null && a.priority_score !== undefined ? ` <small>${Number(a.priority_score).toFixed(2)}</small>` : ""}</td>
         <td class="status-${a.status}">${
           a.status === "confirmed"
             ? "مؤكد"
@@ -382,7 +383,9 @@
                 ? "غياب"
                 : a.status === "cancelled"
                   ? "ملغي"
-                  : a.status
+                  : a.status === "waitlisted"
+                    ? "قائمة انتظار"
+                    : a.status
         }</td>
         <td>
           <button class="btn btn-primary btn-sm"
@@ -393,7 +396,7 @@
       </tr>`,
             )
             .join("") ||
-          '<tr><td colspan="6" class="empty">لا توجد مواعيد</td></tr>';
+          '<tr><td colspan="7" class="empty">لا توجد مواعيد</td></tr>';
       }
 
       async function setStatus(apptId, status) {

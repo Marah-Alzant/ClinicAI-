@@ -6,6 +6,7 @@ then maps that score to a priority class (P1 / P2 / P3).
 All weights are expert-defined and sum to 1.0.
 """
 from dataclasses import dataclass
+from nlp.normalizer import normalize
 
 # ── Weight table (must sum to 1.0) ────────────────────────────────────────────
 WEIGHTS = {
@@ -103,9 +104,27 @@ def score_and_classify(data: dict) -> PriorityResult:
 
 def _complaint_score(data: dict) -> float:
     complaint = data.get("complaint") or {}
+    raw = ""
     if isinstance(complaint, dict):
-        return float(complaint.get("urgency_score", 0.2))
-    return 0.2
+        raw = complaint.get("raw", "") or ""
+        base = float(complaint.get("urgency_score", 0.2))
+    else:
+        raw = str(complaint or "")
+        base = 0.2
+
+    text = normalize(raw)
+    red_flags = [
+        "وجع صدر", "الم صدر", "ضغط على الصدر", "ضيق نفس", "اختناق",
+        "شلل", "تشنج", "اغماء", "نزيف", "حرق", "كسر مفتوح",
+        "الم شديد", "صداع شديد", "حمى عاليه", "سكري مرتفع", "ضغط عالي",
+    ]
+    moderate_flags = ["دوخه", "تنميل", "كسر", "قيء", "اسهال شديد", "التهاب", "الم"]
+
+    if any(flag in text for flag in red_flags):
+        return 1.0
+    if any(flag in text for flag in moderate_flags):
+        return max(base, 0.6)
+    return base
 
 
 def _urgency_score(data: dict) -> float:
@@ -118,11 +137,11 @@ def _followup_score(data: dict) -> float:
 
 
 def _specialty_score(data: dict) -> float:
-    # Use specialty from complaint first, then the hint from NLP
+    # Prefer the final FSM/classifier specialty over a generic complaint fallback.
     complaint = data.get("complaint") or {}
     specialty = (
-        complaint.get("specialty")
-        or data.get("specialty_hint")
+        data.get("specialty_hint")
+        or complaint.get("specialty")
         or "general_practice"
     )
     return SPECIALTY_SCORES.get(specialty, 0.3)

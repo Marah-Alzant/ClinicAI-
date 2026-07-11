@@ -12,11 +12,37 @@ content %}
 {% if sessions %} {% for s in sessions %}
 <div class="card" style="margin-bottom: 16px">
   <div class="card-header">
-    👤 {{ s.patient_name or "مريض غير معروف" }}
+    👤 {{ s.patient.name if s.patient else (s.patient_name or "مريض غير معروف") }}
     <span style="color: var(--muted); font-size: 0.8rem">
       {{ s.session_datetime.strftime("%H:%M") }}
     </span>
   </div>
+
+  <div style="padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+    {% if s.patient %}
+      <span class="badge">Patient #{{ s.patient.patient_id }}</span>
+    {% else %}
+      <span class="badge">غير مربوط بمريض</span>
+    {% endif %}
+
+    {% if s.appointment %}
+      <span class="badge">موعد #{{ s.appointment.appt_id }}</span>
+      <span class="badge">{{ s.appointment.status }}</span>
+      {% if s.appointment.appt_datetime %}
+        <span class="badge">{{ s.appointment.appt_datetime.strftime("%H:%M") }}</span>
+      {% endif %}
+      {% if s.appointment.slot %}
+        <span class="badge">Slot #{{ s.appointment.slot.slot_id }}</span>
+      {% endif %}
+    {% else %}
+      <span class="badge">بدون موعد مرتبط</span>
+    {% endif %}
+
+    {% if s.doctor %}
+      <span class="badge">الطبيب: {{ s.doctor.name or s.doctor.telegram_id }}</span>
+    {% endif %}
+  </div>
+
   <div
     style="
       padding: 16px 20px;
@@ -29,7 +55,7 @@ content %}
       <div style="color: var(--muted); font-size: 0.75rem; margin-bottom: 4px">
         الشكوى
       </div>
-      <div>{{ s.chief_complaint or "—" }}</div>
+      <div>{{ s.chief_complaint or (s.appointment.complaint_summary if s.appointment else "—") }}</div>
     </div>
     <div>
       <div style="color: var(--muted); font-size: 0.75rem; margin-bottom: 4px">

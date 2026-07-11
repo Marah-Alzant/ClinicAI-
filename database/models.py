@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Date, Text, ForeignKey, Boolean, JSON
+    Column, Integer, String, DateTime, Text, ForeignKey, JSON, Float
 )
 from sqlalchemy.orm import relationship
 from .db import Base
@@ -13,9 +13,15 @@ class Patient(Base):
     patient_id = Column(Integer, primary_key=True, autoincrement=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=True)
+    phone = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     appointments = relationship("Appointment", back_populates="patient")
+    profile = relationship("PatientProfile", back_populates="patient", uselist=False)
+    conversations = relationship("Conversation", back_populates="patient")
+    message_logs = relationship("MessageLog", back_populates="patient")
+    sessions = relationship("Session", back_populates="patient")
 
 
 class Doctor(Base):
@@ -24,6 +30,7 @@ class Doctor(Base):
     doctor_id = Column(Integer, primary_key=True, autoincrement=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=True)
+    specialty = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sessions = relationship("Session", back_populates="doctor")
@@ -34,13 +41,21 @@ class Appointment(Base):
 
     appt_id = Column(String(64), primary_key=True)
     patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True)
+    slot_id = Column(Integer, ForeignKey("slots.slot_id"), nullable=True, index=True)
     appt_datetime = Column(DateTime, nullable=True)
     specialty = Column(String(128), nullable=True)
+    specialty_ar = Column(String(128), nullable=True)
     priority_class = Column(String(8), nullable=True)
+    priority_score = Column(Float, nullable=True)
+    complaint_summary = Column(Text, nullable=True)
+    time_preference = Column(JSON, nullable=True)
     status = Column(String(32), nullable=False, default="confirmed")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     patient = relationship("Patient", back_populates="appointments")
+    slot = relationship("Slot", back_populates="appointment")
+    sessions = relationship("Session", back_populates="appointment")
 
 
 class Session(Base):
@@ -48,6 +63,8 @@ class Session(Base):
 
     session_id = Column(Integer, primary_key=True, autoincrement=True)
     doctor_id = Column(Integer, ForeignKey("doctors.doctor_id"), nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True)
+    appointment_id = Column(String(64), ForeignKey("appointments.appt_id"), nullable=True)
     patient_name = Column(String(255), nullable=True)
     chief_complaint = Column(Text, nullable=True)
     diagnosis = Column(Text, nullable=True)
@@ -58,28 +75,23 @@ class Session(Base):
     session_datetime = Column(DateTime, default=datetime.utcnow)
 
     doctor = relationship("Doctor", back_populates="sessions")
+    patient = relationship("Patient", back_populates="sessions")
+    appointment = relationship("Appointment", back_populates="sessions")
 
 
 class Slot(Base):
     __tablename__ = "slots"
 
     slot_id = Column(Integer, primary_key=True, autoincrement=True)
-    slot_datetime = Column(DateTime, nullable=False)
-    specialty = Column(String(128), nullable=False, default="general_practice")
-    priority_class = Column(String(8), nullable=True)
-    status = Column(String(32), nullable=False, default="available")
+    slot_datetime = Column(DateTime, nullable=False, index=True)
+    specialty = Column(String(128), nullable=False, default="general_practice", index=True)
+    priority_class = Column(String(8), nullable=True)  # Optional reserved capacity: P1/P2/P3
+    status = Column(String(32), nullable=False, default="available", index=True)
     notes = Column(Text, nullable=True)
-
-
-class MessageLog(Base):
-    __tablename__ = "message_logs"
-
-    log_id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(Integer, nullable=False)
-    direction = Column(String(16), nullable=False)
-    message_type = Column(String(32), nullable=False)
-    content = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    appointment = relationship("Appointment", back_populates="slot", uselist=False)
 
 
 class Conversation(Base):
@@ -87,17 +99,41 @@ class Conversation(Base):
 
     conversation_id = Column(Integer, primary_key=True, autoincrement=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True, index=True)
+    role = Column(String(32), nullable=False, default="patient")  # patient/doctor/unknown
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    patient = relationship("Patient", back_populates="conversations")
+    messages = relationship("MessageLog", back_populates="conversation")
+
+
+class MessageLog(Base):
+    __tablename__ = "message_logs"
+
+    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.conversation_id"), nullable=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True, index=True)
+    telegram_id = Column(Integer, nullable=False, index=True)
+    direction = Column(String(16), nullable=False)
+    message_type = Column(String(32), nullable=False)
+    content = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    conversation = relationship("Conversation", back_populates="messages")
+    patient = relationship("Patient", back_populates="message_logs")
+
 
 class PatientProfile(Base):
     __tablename__ = "patient_profiles"
 
     profile_id = Column(Integer, primary_key=True, autoincrement=True)
+    patient_id = Column(Integer, ForeignKey("patients.patient_id"), unique=True, nullable=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     data = Column(JSON, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    patient = relationship("Patient", back_populates="profile")

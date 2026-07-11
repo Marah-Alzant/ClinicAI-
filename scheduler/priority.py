@@ -19,9 +19,9 @@ WEIGHTS = {
 }
 
 # ── Priority thresholds ────────────────────────────────────────────────────────
-THETA_P1 = 0.68   # score >= 0.68  →  P1 (High / عاجل)
-THETA_P2 = 0.43   # score >= 0.43  →  P2 (Medium / متوسط)
-                  # score <  0.43  →  P3 (Routine / روتيني)
+THETA_P1 = 0.66 # score >= 0.66 →  P1 (High / عاجل)
+THETA_P2 = 0.38 # score >= 0.38 →  P2 (Medium / متوسط)
+                  # score <  0.38 →  P3 (Routine / روتيني)
 
 # ── Specialty urgency levels (f4 encoding) ────────────────────────────────────
 SPECIALTY_SCORES = {
@@ -46,6 +46,14 @@ TIMING_SCORES = {
     30: 0.1,   # this month
 }
 
+# ── Complaint text urgency hints (used when urgency_score absent) ──
+COMPLAINT_URGENCY_KEYWORDS = {
+    "high":   ["حاد", "شديد", "جدا", "مفاجئ", "فجأة", "لا أستطيع", "لا يستطيع", "عاجل", "أزمة"],
+    "medium": ["متوسط", "مزمن", "متكرر", "مستمر"],
+    "low":    ["خفيف", "بسيط", "أحيان", "دوري", "روتيني", "متابعة"],
+}
+COMPLAINT_KEYWORD_SCORES = {"high": 0.85, "medium": 0.55, "low": 0.25}
+DEFAULT_COMPLAINT_SCORE = 0.2
 
 @dataclass
 class PriorityResult:
@@ -103,6 +111,14 @@ def score_and_classify(data: dict) -> PriorityResult:
         breakdown={"f1": f1, "f2": f2, "f3": f3, "f4": f4, "f5": f5},
     )
 
+def _score_from_complaint_text(raw: str) -> float | None:
+    if not raw or not raw.strip():
+        return None
+    text = raw.strip()
+    for level in ("high", "medium", "low"):
+        if any(kw in text for kw in COMPLAINT_URGENCY_KEYWORDS[level]):
+            return COMPLAINT_KEYWORD_SCORES[level]
+    return None
 
 # ── Factor encoders ────────────────────────────────────────────────────────────
 
@@ -125,7 +141,11 @@ def _complaint_score(data: Dict[str, Any]) -> float:
         }
         if category in category_map:
             return category_map[category]
-    return 0.2
+        raw = str(complaint.get("raw", "")).strip()
+        text_score = _score_from_complaint_text(raw)
+        if text_score is not None:
+            return text_score
+    return DEFAULT_COMPLAINT_SCORE
 
 def _urgency_score(data: Dict[str, Any]) -> float:
     try:
@@ -156,16 +176,16 @@ def _timing_score(data: Dict[str, Any]) -> float:
     time_pref = data.get("time_pref")
     # Type-safety first
     if not isinstance(time_pref, dict):
-        return 0.3
+        return 0.4
     pref_date_raw = time_pref.get("date")
     if not pref_date_raw:
-        return 0.3  # no explicit date preference
+        return 0.4 # no explicit date preference
     try:
         pref_date = date.fromisoformat(str(pref_date_raw))
         delta = (pref_date - date.today()).days
         delta = max(delta, 0)
     except (ValueError, TypeError):
-        return 0.3
+        return 0.4
 
     for threshold in sorted(TIMING_SCORES.keys()):
         if delta <= threshold:

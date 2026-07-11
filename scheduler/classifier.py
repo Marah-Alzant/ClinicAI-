@@ -6,12 +6,12 @@ Uses a layered approach: keyword rules first, Gemini fallback for ambiguous case
 """
 import re
 import logging
-from typing import Optional
 from nlp.normalizer import normalize
 
 logger = logging.getLogger(__name__)
 # ── Specialty routing rules ────────────────────────────────────────────────────
 # Each entry: pattern (regex on normalized Arabic) → specialty key
+# Patterns run on normalized Arabic (ة→ه, أ/إ/آ→ا). Prefer phrases over single words.
 ROUTING_RULES: list[tuple[str, str]] = [
     # Neurology — acute neuro symptoms (not mild dizziness alone)
     (
@@ -24,25 +24,29 @@ ROUTING_RULES: list[tuple[str, str]] = [
     (
         r"كسر|التواء|عظام|مفاصل|الركبه|الورك|الكتف|"
         r"الم ظهر|وجع ظهر|الم ركبه|الم مفصل|عمود فقري|"
-        r"\bوتر\b|الم عضله|وقعه|لا يستطيع المشي|لا عم يمشي",
+        r"\bوتر\b|الم عضله|وقعه|لا يستطيع المشي|لا عم يمشي|"
+        r"الم\s*ظهر|وجع\s*ظهر|الم\s*رقبه|الم\s*كتف|الم\s*ركبه",
         "orthopedics",
     ),
     # Gynecology — OB/GYN context (avoid bare "نساء")
     (
         r"حمل|ولاده|دوره شهريه|الم رحم|الم مبيض|الم بطن للحامل|"
-        r"نزيف رحمي|مشاكل الحمل|عياده نساء|توليد|مهبل",
+        r"نزيف رحمي|مشاكل الحمل|عياده نساء|توليد|مهبل|"
+        r"الدور[هة]\s*الشهري[هة]|اضطرابات.*دور[هة]|عياد[هة]\s*نساء|فحص\s*مهبلي",
         "gynecology",
     ),
     # Dermatology — skin-specific (avoid bare "حبوب" / "جلد")
     (
         r"طفح جلدي|حكه جلد|حساسيه جلد|اكزيما|صدفيه|بقع جلد|"
-        r"احمرار جلد|التهاب جلد|شرى|قشره جلد",
+        r"احمرار جلد|التهاب جلد|شرى|قشره جلد|"
+        r"بشر[هة]|حب\s*الشباب|جفاف\s*جلد|احمرار\s*جلد|حك[هة]\s*جلد",
         "dermatology",
     ),
     # Gastroenterology — GI symptoms
     (
         r"الم معده|الم بطن|مغص|اسهال|امساك|قولون|بواسير|كبد|"
-        r"ترجيع|غثيان|حرقه معده|انتفاخ بطن",
+        r"ترجيع|غثيان|حرقه معده|انتفاخ بطن|"
+        r"الم\s*بطن|وجع\s*بطن|عسر\s*هضم|الم\s*معد[هة]",
         "gastroenterology",
     ),
     # Chronic diseases — program routing (avoid bare "ضغط" → stress)
@@ -50,7 +54,8 @@ ROUTING_RULES: list[tuple[str, str]] = [
         r"سكري|سكر|انسولين|هبوط سكر|ارتفاع سكر|السكر التراكمي|"
         r"ضغط الدم|ضغط مرتفع|قراءات ضغط|ادويه الضغط|متابعه الضغط|"
         r"ربو|كولسترول|دهون|غده درقيه|مرض مزمن|ادويه مزمنه|"
-        r"متابعه السكر|تجديد وصفه|فحص السكر|متابعه مزمنه",
+        r"متابعه السكر|تجديد وصفه|فحص السكر|متابعه مزمنه|"
+        r"متابع[هة]\s*ل?ل?ضغط|فحص\s*روتيني\s*ل?ل?ضغط|قراءات\s*ضغط",
         "chronic_diseases",
     ),
     # Elderly — caregiver / geriatric program
@@ -68,6 +73,19 @@ ROUTING_RULES: list[tuple[str, str]] = [
     ),
 ]
 
+# ب) تفعيل 
+# Gemini 
+# في الـ 
+# benchmark
+#  للنصوص الغامضة —
+#   في الإنتاج يعمل عبر 
+#   plan_appointment()، 
+#   لكن 
+#   benchmark 
+#   يستخدم 
+#   classify_specialty() 
+#   فقط.
+
 # ── Human-readable Arabic specialty names ─────────────────────────────────────
 SPECIALTY_NAMES_AR = {
     "neurology":         "طب الأعصاب",
@@ -81,6 +99,24 @@ SPECIALTY_NAMES_AR = {
 }
 
 SPECIALTY_KEYS = set(SPECIALTY_NAMES_AR.keys())
+
+_VALID_KEY_PATTERN = re.compile(r"[a-z_]+")
+
+
+def _parse_gemini_specialty_key(raw: str) -> str | None:
+    """Extract a valid specialty key from a Gemini free-text response."""
+    if not raw or not raw.strip():
+        return None
+    text = raw.strip().lower()
+    for token in _VALID_KEY_PATTERN.findall(text):
+        if token in SPECIALTY_KEYS:
+            return token
+    compact = re.sub(r"[^a-z_]", "", text)
+    for key in sorted(SPECIALTY_KEYS, key=len, reverse=True):
+        if key in compact:
+            return key
+    return None
+
 
 def classify_specialty(text: str) -> dict:
     """
@@ -117,16 +153,14 @@ async def classify_with_gemini_fallback(text: str, gemini_client,) -> dict:
             f"المريض يقول: '{normalized_text}'\n\n"
             f"اختر التخصص الأنسب من هذه المفاتيح فقط:\n"
             + "\n".join(f"- {k}: {v}" for k, v in SPECIALTY_NAMES_AR.items())
-            + "\n\nأجب بمفتاح واحد فقط من القائمة (مثل: cardiology)."
+            + "\n\nأجب بمفتاح واحد فقط من القائمة بالإنجليزية (مثل: neurology). بدون أي نص إضافي."
         )
         try:
             gemini_result = await gemini_client.ask(prompt, max_tokens=20)
-            cleaned = (gemini_result or "").strip().lower()
-            if not cleaned:
+            if not (gemini_result or "").strip():
                 raise ValueError("Empty response from Gemini")
-            specialty_key = cleaned.split()[0]
- 
-            if specialty_key in SPECIALTY_KEYS:
+            specialty_key = _parse_gemini_specialty_key(gemini_result)
+            if specialty_key:
                 result = {
                     "specialty":    specialty_key,
                     "specialty_ar": SPECIALTY_NAMES_AR[specialty_key],

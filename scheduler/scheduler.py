@@ -33,10 +33,10 @@ APPOINTMENT_STATUSES = frozenset(
 )
 FALLBACK_SPECIALTY = "general_practice"
 
-BLOCK_ACCESS: dict[str, set[str | None]] = {
-    "P1": {"P1", None},
-    "P2": {"P2", None},
-    "P3": {"P3", None},
+BLOCK_ACCESS = {
+    "P1": {"P1","P2","P3",None},
+    "P2": {"P2","P3",None},
+    "P3": {"P3",None}
 }
 
 WAVE_HORIZON_DAYS: dict[str, int] = {
@@ -269,6 +269,28 @@ def book_slot(db: Session, slot: AppointmentSlot) -> None:
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
 
+def _build_slot_sort_key(
+    slot: AppointmentSlot,
+    *,
+    pref_day: date | None,
+    priority_class: str,
+    clinic_load: dict[tuple[str, date], int],
+    doctor_load: dict[tuple[int, date], int],
+    utilization: dict[tuple[str, date], float],
+) -> tuple:
+    day = slot.slot_datetime.date()
+    day_match = 0 if (pref_day is None or day == pref_day) else 1
+    block_match = 0 if slot.priority_class == priority_class else 1
+    c_load = clinic_load.get((slot.specialty, day), 0)
+    d_load = doctor_load.get((slot.doctor_id, day), 0) if slot.doctor_id else 0
+    util = utilization.get((slot.specialty, day), 0.0)
+
+    # P1: earliest slot wins even on busier days; P2/P3: spread load first
+    if priority_class == "P1":
+        return (day_match, block_match, slot.slot_datetime, c_load, d_load, util)
+    return (day_match, block_match, c_load, d_load, util, slot.slot_datetime)
+
+
 def rank_slots(
     db: Session,
     slots: list[AppointmentSlot],
@@ -282,18 +304,18 @@ def rank_slots(
     clinic_load = clinic_load_by_day(db, specialty)
     doctor_load = doctor_load_by_day(db)
     utilization = slot_utilization_by_day(db, specialty)
-    time_bias = 1.0 - priority_score
 
-    def sort_key(slot: AppointmentSlot) -> tuple:
-        day = slot.slot_datetime.date()
-        day_match = 0 if (pref_day is None or day == pref_day) else 1
-        block_match = 0 if slot.priority_class == priority_class else 1
-        c_load = clinic_load.get((slot.specialty, day), 0)
-        d_load = doctor_load.get((slot.doctor_id, day), 0) if slot.doctor_id else 0
-        util = utilization.get((slot.specialty, day), 0.0)
-        return (day_match, block_match, c_load, d_load, util, time_bias, slot.slot_datetime)
-
-    return sorted(slots, key=sort_key)
+    return sorted(
+        slots,
+        key=lambda s: _build_slot_sort_key(
+            s,
+            pref_day=pref_day,
+            priority_class=priority_class,
+            clinic_load=clinic_load,
+            doctor_load=doctor_load,
+            utilization=utilization,
+        ),
+    )
 
 
 def select_best_slot(
@@ -476,7 +498,6 @@ async def _classify(data: dict[str, Any], gemini_client: Optional[object]) -> di
 
     return classify_specialty(complaint_text)
 
-
 async def plan_appointment(
     data: dict[str, Any],
     db: Session,
@@ -487,8 +508,6 @@ async def plan_appointment(
     spec_result = await _classify(safe_data, gemini_client)
     safe_data["specialty_hint"] = spec_result["specialty"]
     safe_data["specialty_ar"] = spec_result["specialty_ar"]
-    if spec_result.get("red_flag"):
-        safe_data["red_flag"] = True
 
     pr = score_and_classify(safe_data)
     priority_class = normalize_priority_class(pr.priority_class)

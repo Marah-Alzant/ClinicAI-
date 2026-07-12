@@ -17,9 +17,11 @@ content %}
         <th>المريض</th>
         <th>الشكوى</th>
         <th>التخصص</th>
+        <th>الطبيب / العيادة</th>
         <th>الأولوية</th>
         <th>الـ Slot</th>
         <th>الحالة</th>
+        <th>إجراء</th>
       </tr>
     </thead>
     <tbody>
@@ -29,6 +31,11 @@ content %}
         <td>{{ a.patient.name if a.patient else '—' }}</td>
         <td title="{{ a.complaint_summary or '' }}">{{ a.complaint_summary or '—' }}</td>
         <td>{{ a.specialty_ar or a.specialty or '—' }}</td>
+        <td>
+          {% if a.slot and a.slot.doctor %}
+            {{ a.slot.doctor.name }}<br><small>{{ a.slot.doctor.clinic_name }} — {{ a.slot.doctor.clinic_code }}</small>
+          {% else %}—{% endif %}
+        </td>
         <td>
           <span class="badge badge-{{ a.priority_class }}">
             {% if a.priority_class == 'P1' %}🔴 عاجل
@@ -52,10 +59,15 @@ content %}
           {% elif a.status == 'cancelled' %}ملغي
           {% else %}{{ a.status }}{% endif %}
         </td>
+        <td>
+          {% if a.slot and not a.sessions and a.status in ['confirmed', 'arrived', 'completed'] %}
+          <a class="btn btn-sm" href="/sessions?day={{ target_date }}&appointment_id={{ a.appt_id }}#new-session">🩺 تسجيل جلسة</a>
+          {% elif a.sessions %}<span class="badge">الجلسة مسجلة</span>{% else %}—{% endif %}
+        </td>
       </tr>
       {% else %}
       <tr>
-        <td colspan="7" class="empty">لا توجد مواعيد لهذا اليوم</td>
+        <td colspan="9" class="empty">لا توجد مواعيد لهذا اليوم</td>
       </tr>
       {% endfor %}
     </tbody>

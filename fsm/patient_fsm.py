@@ -293,8 +293,12 @@ class PatientFSM:
                 self.slot = {
                     "slot_id": slot.slot_id,
                     "slot_datetime": slot.slot_datetime,
-                    "specialty": slot.specialty,
+                    "specialty": slot.doctor.specialty if slot.doctor else slot.specialty,
                     "priority_class": slot.priority_class,
+                    "doctor_id": slot.doctor.doctor_id if slot.doctor else None,
+                    "doctor_name": slot.doctor.name if slot.doctor else None,
+                    "clinic_code": slot.doctor.clinic_code if slot.doctor else None,
+                    "clinic_name": slot.doctor.clinic_name if slot.doctor else None,
                 }
 
         if not self.slot:
@@ -312,6 +316,8 @@ class PatientFSM:
             f"وجدت موعد مناسب! 📅\n\n"
             f"📆 {dt}\n"
             f"🏥 التخصص: {self.data.get('specialty_ar', '')}\n"
+            f"👨‍⚕️ الطبيب: {self.slot.get('doctor_name') or '—'}\n"
+            f"🏢 العيادة: {self.slot.get('clinic_name') or '—'} ({self.slot.get('clinic_code') or '—'})\n"
             f"{self.priority.label_ar} — درجة الأولوية: {self.priority.score:.2f}\n\n"
             f"تأكد الحجز؟",
             confirm_keyboard(),
@@ -367,6 +373,8 @@ class PatientFSM:
                 "✅ تم تأكيد حجزك وحفظ ملفك في النظام!\n"
                 f"رقم الحجز: {appt.appt_id}\n"
                 f"📆 {appt.appt_datetime.strftime('%A، %d/%m/%Y — %H:%M')}\n"
+                f"👨‍⚕️ الطبيب: {self.slot.get('doctor_name') or '—'}\n"
+                f"🏢 العيادة: {self.slot.get('clinic_name') or '—'}\n"
                 "سيظهر الموعد تلقائياً في لوحة التحكم كموعد محجوز. نتمنى لك الشفاء 🌿",
                 None,
             )

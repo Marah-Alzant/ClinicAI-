@@ -18,6 +18,10 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 TTS_VOICE = os.getenv("TTS_VOICE", "ar-PS-SamaNeural")
+TTS_ENABLED = os.getenv("TTS_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+TTS_RESPONSE_MODE = os.getenv("TTS_RESPONSE_MODE", "auto").strip().lower()
+if TTS_RESPONSE_MODE not in {"text", "voice", "both", "auto"}:
+    TTS_RESPONSE_MODE = "auto"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")

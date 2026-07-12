@@ -329,3 +329,45 @@ flowchart TD
 | Same patient books cardiology 10:00 and dermatology 10:30 same day | Allowed |
 | Different patients book the same slot | Blocked by slot status |
 | Patient cancels an appointment then books another | Allowed after cancellation |
+
+## 13. Complete V4: doctor-owned clinics, slots, dashboard sessions, and active TTS
+
+### Doctor as clinic resource
+
+The application uses one `doctors` table. Each doctor represents one clinic/specialty and owns many scheduling slots:
+
+```mermaid
+erDiagram
+    DOCTORS ||--o{ SLOTS : owns
+    SLOTS ||--o| APPOINTMENTS : reserved_by
+    PATIENTS ||--o{ APPOINTMENTS : books
+    DOCTORS ||--o{ SESSIONS : performs
+    PATIENTS ||--o{ SESSIONS : receives
+    APPOINTMENTS ||--o| SESSIONS : documented_as
+```
+
+Eight doctors are seeded with `name`, `specialty`, `clinic_code`, and `clinic_name`. `telegram_id` is optional and is only used when a doctor explicitly uses the Telegram doctor interface.
+
+### Slot retrieval
+
+The scheduling engine now searches active doctors by specialty and returns only slots owned by the matching doctor/clinic. The selected slot supplies the doctor and clinic shown to the patient and dashboard.
+
+### Dashboard session entry
+
+A clinical session can be registered from the dashboard using an existing appointment. The backend derives:
+
+```text
+Appointment -> Slot -> Doctor
+Appointment -> Patient
+```
+
+It then creates the session, links it to the doctor/patient/appointment, and marks the appointment as `completed`. No doctor Telegram ID is required.
+
+### Patient voice and TTS
+
+```text
+Patient voice -> STT/Whisper -> text -> PatientFSM -> response text
+                                              -> TTS/edge-tts -> OGG voice
+```
+
+Default response mode is `auto`: text messages receive text replies; voice messages receive the readable text reply plus a generated Telegram voice reply. TTS failure never interrupts booking; text remains the fallback.

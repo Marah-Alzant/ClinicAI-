@@ -1,9 +1,20 @@
 from __future__ import annotations
+
 from datetime import datetime
+
 from sqlalchemy import (
-    Column, Integer, String, DateTime, Text, ForeignKey, JSON, Float
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship
+
 from .db import Base
 
 
@@ -28,11 +39,16 @@ class Doctor(Base):
     __tablename__ = "doctors"
 
     doctor_id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(Integer, unique=True, index=True, nullable=False)
-    name = Column(String(255), nullable=True)
-    specialty = Column(String(128), nullable=True)
+    # Optional: a doctor can exist as a clinic/scheduling resource without using Telegram.
+    telegram_id = Column(Integer, unique=True, index=True, nullable=True)
+    name = Column(String(255), nullable=False)
+    specialty = Column(String(128), nullable=False, index=True)
+    clinic_code = Column(String(32), unique=True, nullable=False, index=True)
+    clinic_name = Column(String(255), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    slots = relationship("Slot", back_populates="doctor")
     sessions = relationship("Session", back_populates="doctor")
 
 
@@ -62,9 +78,9 @@ class Session(Base):
     __tablename__ = "sessions"
 
     session_id = Column(Integer, primary_key=True, autoincrement=True)
-    doctor_id = Column(Integer, ForeignKey("doctors.doctor_id"), nullable=False)
-    patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True)
-    appointment_id = Column(String(64), ForeignKey("appointments.appt_id"), nullable=True)
+    doctor_id = Column(Integer, ForeignKey("doctors.doctor_id"), nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True, index=True)
+    appointment_id = Column(String(64), ForeignKey("appointments.appt_id"), nullable=True, index=True)
     patient_name = Column(String(255), nullable=True)
     chief_complaint = Column(Text, nullable=True)
     diagnosis = Column(Text, nullable=True)
@@ -83,14 +99,18 @@ class Slot(Base):
     __tablename__ = "slots"
 
     slot_id = Column(Integer, primary_key=True, autoincrement=True)
+    # The doctor is the clinic/scheduling resource that owns this slot.
+    doctor_id = Column(Integer, ForeignKey("doctors.doctor_id"), nullable=False, index=True)
     slot_datetime = Column(DateTime, nullable=False, index=True)
+    # Kept for backward compatibility and fast reporting; doctor.specialty is authoritative.
     specialty = Column(String(128), nullable=False, default="general_practice", index=True)
-    priority_class = Column(String(8), nullable=True)  # Optional reserved capacity: P1/P2/P3
+    priority_class = Column(String(8), nullable=True)
     status = Column(String(32), nullable=False, default="available", index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    doctor = relationship("Doctor", back_populates="slots")
     appointment = relationship("Appointment", back_populates="slot", uselist=False)
 
 
@@ -100,7 +120,7 @@ class Conversation(Base):
     conversation_id = Column(Integer, primary_key=True, autoincrement=True)
     telegram_id = Column(Integer, unique=True, index=True, nullable=False)
     patient_id = Column(Integer, ForeignKey("patients.patient_id"), nullable=True, index=True)
-    role = Column(String(32), nullable=False, default="patient")  # patient/doctor/unknown
+    role = Column(String(32), nullable=False, default="patient")
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)

@@ -79,12 +79,17 @@ def _day_bounds(value: datetime) -> tuple[datetime, datetime]:
 def _appointment_brief(appointment: Appointment | None) -> dict | None:
     if appointment is None:
         return None
+    doctor = appointment.slot.doctor if appointment.slot and appointment.slot.doctor else None
     return {
         "appt_id": appointment.appt_id,
         "appt_datetime": appointment.appt_datetime,
         "specialty": appointment.specialty,
         "specialty_ar": appointment.specialty_ar,
         "status": appointment.status,
+        "doctor_id": doctor.doctor_id if doctor else None,
+        "doctor_name": doctor.name if doctor else None,
+        "clinic_code": doctor.clinic_code if doctor else None,
+        "clinic_name": doctor.clinic_name if doctor else None,
     }
 
 
@@ -115,7 +120,10 @@ def find_patient_booking_conflict(
 
     time_stmt = (
         select(Appointment)
-        .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+        )
         .where(
             Appointment.patient_id == patient_id,
             Appointment.status.in_(ACTIVE_BOOKING_STATUSES),
@@ -139,7 +147,10 @@ def find_patient_booking_conflict(
     day_start, day_end = _day_bounds(slot_datetime)
     specialty_stmt = (
         select(Appointment)
-        .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+        )
         .where(
             Appointment.patient_id == patient_id,
             Appointment.status.in_(ACTIVE_BOOKING_STATUSES),
@@ -212,7 +223,10 @@ def get_latest_patient_appointment(db: Session, telegram_id: int):
     stmt = (
         select(Appointment)
         .join(Patient, Appointment.patient_id == Patient.patient_id)
-        .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+        )
         .where(Patient.telegram_id == telegram_id)
         .order_by(desc(Appointment.created_at))
         .limit(1)
@@ -235,7 +249,11 @@ def get_todays_queue(db: Session, target: date | None = None):
     end = datetime.combine(target, datetime.max.time())
     stmt = (
         select(Appointment)
-        .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+            joinedload(Appointment.sessions),
+        )
         .where(Appointment.appt_datetime >= start, Appointment.appt_datetime <= end)
         .order_by(Appointment.appt_datetime)
     )
@@ -269,7 +287,7 @@ def get_sessions(db: Session, target: date | None = None):
             joinedload(DoctorSession.doctor),
             joinedload(DoctorSession.patient),
             joinedload(DoctorSession.appointment).joinedload(Appointment.patient),
-            joinedload(DoctorSession.appointment).joinedload(Appointment.slot),
+            joinedload(DoctorSession.appointment).joinedload(Appointment.slot).joinedload(Slot.doctor),
         )
         .where(
             DoctorSession.session_datetime >= start,
@@ -387,18 +405,31 @@ def _slot_query(
     priority_class: str | None,
     preferred_date: str | None = None,
     allow_general_fallback: bool = False,
+    doctor_id: int | None = None,
 ):
+    """Build a slot query owned by an active doctor/clinic."""
     now = datetime.utcnow()
     specialties = [specialty]
     if allow_general_fallback and specialty != "general_practice":
         specialties.append("general_practice")
 
-    stmt = select(Slot).where(
-        Slot.status == "available",
-        Slot.slot_datetime >= now,
-        Slot.specialty.in_(specialties),
-        or_(Slot.priority_class.is_(None), Slot.priority_class.in_([p for p in _allowed_slot_priorities(priority_class) if p])),
+    stmt = (
+        select(Slot)
+        .join(Slot.doctor)
+        .options(joinedload(Slot.doctor))
+        .where(
+            Slot.status == "available",
+            Slot.slot_datetime >= now,
+            Doctor.is_active.is_(True),
+            Doctor.specialty.in_(specialties),
+            or_(
+                Slot.priority_class.is_(None),
+                Slot.priority_class.in_([p for p in _allowed_slot_priorities(priority_class) if p]),
+            ),
+        )
     )
+    if doctor_id is not None:
+        stmt = stmt.where(Slot.doctor_id == doctor_id)
 
     if preferred_date:
         try:
@@ -408,7 +439,12 @@ def _slot_query(
         except ValueError:
             pass
 
-    return stmt.order_by(Slot.slot_datetime, Slot.slot_id)
+    # Prefer the requested specialty before general-practice fallback.
+    return stmt.order_by(
+        (Doctor.specialty != specialty),
+        Slot.slot_datetime,
+        Slot.slot_id,
+    )
 
 
 def find_next_available_slot(
@@ -418,6 +454,7 @@ def find_next_available_slot(
     preferred_date: str | None = None,
     patient_id: int | None = None,
     telegram_id: int | None = None,
+    doctor_id: int | None = None,
 ):
     """
     Read-only lookup used by FSM preview.
@@ -427,11 +464,11 @@ def find_next_available_slot(
 
     # P1 should get the earliest safe slot; P2/P3 first try user's preferred date.
     if priority_class != "P1" and preferred_date:
-        slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class, preferred_date), patient_id)
+        slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class, preferred_date, doctor_id=doctor_id), patient_id)
         if slot:
             return slot
 
-    slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class), patient_id)
+    slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class, doctor_id=doctor_id), patient_id)
     if slot:
         return slot
 
@@ -440,14 +477,14 @@ def find_next_available_slot(
         if priority_class != "P1" and preferred_date:
             slot = _first_slot_without_patient_conflict(
                 db,
-                _slot_query(specialty, priority_class, preferred_date, allow_general_fallback=True),
+                _slot_query(specialty, priority_class, preferred_date, allow_general_fallback=True, doctor_id=doctor_id),
                 patient_id,
             )
             if slot:
                 return slot
         return _first_slot_without_patient_conflict(
             db,
-            _slot_query(specialty, priority_class, allow_general_fallback=True),
+            _slot_query(specialty, priority_class, allow_general_fallback=True, doctor_id=doctor_id),
             patient_id,
         )
 
@@ -470,12 +507,17 @@ def reserve_slot_and_create_appointment(db: Session, data: dict, slot_id: int | 
     """
     slot = None
     if slot_id is not None:
-        slot = db.scalar(select(Slot).where(Slot.slot_id == slot_id))
-        if slot is None or slot.status != "available":
+        slot = db.scalar(
+            select(Slot)
+            .options(joinedload(Slot.doctor))
+            .where(Slot.slot_id == slot_id)
+        )
+        if slot is None or slot.status != "available" or slot.doctor is None or not slot.doctor.is_active:
             return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
 
     appt_datetime = slot.slot_datetime if slot else None
-    specialty = data.get("specialty_hint") or data.get("specialty")
+    requested_specialty = data.get("specialty_hint") or data.get("specialty")
+    specialty = slot.doctor.specialty if slot and slot.doctor else requested_specialty
 
     if slot is not None:
         conflict = find_patient_booking_conflict(db, patient.patient_id, appt_datetime, specialty)
@@ -638,7 +680,10 @@ def find_appointment_for_session(
     if appointment_id:
         appointment = db.scalar(
             select(Appointment)
-            .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+            .options(
+                joinedload(Appointment.patient),
+                joinedload(Appointment.slot).joinedload(Slot.doctor),
+            )
             .where(Appointment.appt_id == appointment_id)
         )
         if appointment:
@@ -654,7 +699,10 @@ def find_appointment_for_session(
 
     base = (
         select(Appointment)
-        .options(joinedload(Appointment.patient), joinedload(Appointment.slot))
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+        )
         .where(Appointment.patient_id == patient.patient_id)
     )
 
@@ -720,6 +768,145 @@ def create_session(db: Session, session_data: dict, doctor_id: int):
         appointment.updated_at = datetime.utcnow()
         db.add(appointment)
 
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+# ── Doctors / clinic schedules / dashboard session entry ─────────────────────
+
+def get_doctors(db: Session, active_only: bool = False):
+    stmt = select(Doctor).order_by(Doctor.doctor_id)
+    if active_only:
+        stmt = stmt.where(Doctor.is_active.is_(True))
+    return db.scalars(stmt).all()
+
+
+def get_doctor_slots(db: Session, target: date | None = None, doctor_id: int | None = None):
+    target = target or date.today()
+    start = datetime.combine(target, datetime.min.time())
+    end = datetime.combine(target, datetime.max.time())
+    stmt = (
+        select(Slot)
+        .options(
+            joinedload(Slot.doctor),
+            joinedload(Slot.appointment).joinedload(Appointment.patient),
+        )
+        .where(Slot.slot_datetime >= start, Slot.slot_datetime <= end)
+        .order_by(Slot.slot_datetime, Slot.doctor_id)
+    )
+    if doctor_id is not None:
+        stmt = stmt.where(Slot.doctor_id == doctor_id)
+    return db.scalars(stmt).unique().all()
+
+
+def get_doctor_schedule_summary(db: Session, target: date | None = None):
+    target = target or date.today()
+    start = datetime.combine(target, datetime.min.time())
+    end = datetime.combine(target, datetime.max.time())
+    doctors = get_doctors(db)
+    slots = get_doctor_slots(db, target)
+    grouped: dict[int, dict] = {
+        doctor.doctor_id: {
+            "doctor": doctor,
+            "total": 0,
+            "available": 0,
+            "booked": 0,
+        }
+        for doctor in doctors
+    }
+    for slot in slots:
+        summary = grouped.setdefault(slot.doctor_id, {"doctor": slot.doctor, "total": 0, "available": 0, "booked": 0})
+        summary["total"] += 1
+        if slot.status == "available":
+            summary["available"] += 1
+        elif slot.status == "booked":
+            summary["booked"] += 1
+    return list(grouped.values())
+
+
+def get_session_candidates(db: Session, target: date | None = None):
+    """Appointments that can be documented from the dashboard without Telegram IDs."""
+    target = target or date.today()
+    start = datetime.combine(target, datetime.min.time())
+    end = datetime.combine(target, datetime.max.time())
+    stmt = (
+        select(Appointment)
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+            joinedload(Appointment.sessions),
+        )
+        .where(
+            Appointment.appt_datetime >= start,
+            Appointment.appt_datetime <= end,
+            Appointment.status.in_(["confirmed", "arrived", "completed"]),
+            Appointment.slot_id.is_not(None),
+        )
+        .order_by(Appointment.appt_datetime)
+    )
+    appointments = db.scalars(stmt).unique().all()
+    return [appointment for appointment in appointments if not appointment.sessions]
+
+
+def _dashboard_list(value: str | list | None, item_key: str) -> list[dict] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value or None
+    values = [part.strip() for part in str(value).replace("\n", ",").split(",") if part.strip()]
+    return [{item_key: item} for item in values] or None
+
+
+def create_session_from_dashboard(db: Session, session_data: dict):
+    """
+    Create one clinical session for a booked appointment from the dashboard.
+    Doctor, patient and clinic are derived from Appointment -> Slot -> Doctor,
+    so no doctor Telegram ID is required.
+    """
+    appointment_id = (session_data.get("appointment_id") or "").strip()
+    if not appointment_id:
+        raise ValueError("appointment_id is required")
+
+    appointment = db.scalar(
+        select(Appointment)
+        .options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.slot).joinedload(Slot.doctor),
+            joinedload(Appointment.sessions),
+        )
+        .where(Appointment.appt_id == appointment_id)
+    )
+    if appointment is None:
+        raise ValueError("Appointment not found")
+    if appointment.slot is None or appointment.slot.doctor is None:
+        raise ValueError("Appointment is not linked to a doctor slot")
+    if appointment.sessions:
+        raise ValueError("A session is already registered for this appointment")
+
+    followup = session_data.get("followup_days")
+    try:
+        followup_days = int(followup) if followup not in (None, "") else None
+    except (TypeError, ValueError):
+        followup_days = None
+
+    session = DoctorSession(
+        doctor_id=appointment.slot.doctor.doctor_id,
+        patient_id=appointment.patient_id,
+        appointment_id=appointment.appt_id,
+        patient_name=appointment.patient.name if appointment.patient else None,
+        chief_complaint=session_data.get("chief_complaint") or appointment.complaint_summary,
+        diagnosis=session_data.get("diagnosis"),
+        medications=_dashboard_list(session_data.get("medications"), "name"),
+        investigations=_dashboard_list(session_data.get("investigations"), "name_ar"),
+        followup_days=followup_days,
+        raw_transcription=session_data.get("raw_transcription"),
+        session_datetime=appointment.appt_datetime or datetime.utcnow(),
+    )
+    db.add(session)
+    appointment.status = "completed"
+    appointment.updated_at = datetime.utcnow()
+    db.add(appointment)
     db.commit()
     db.refresh(session)
     return session

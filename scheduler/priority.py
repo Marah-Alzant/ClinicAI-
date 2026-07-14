@@ -6,6 +6,7 @@ then maps that score to a priority class (P1 / P2 / P3).
 All weights are expert-defined and sum to 1.0.
 """
 from dataclasses import dataclass
+from nlp.normalizer import normalize
 from datetime import date
 from typing import Dict, Any
 
@@ -124,6 +125,7 @@ def _score_from_complaint_text(raw: str) -> float | None:
 
 def _complaint_score(data: Dict[str, Any]) -> float:
     complaint = data.get("complaint") or {}
+    raw = ""
     if isinstance(complaint, dict):
         # Prefer explicit urgency score if available
         if "urgency_score" in complaint:
@@ -165,8 +167,8 @@ def _specialty_score(data: Dict[str, Any]) -> float:
     if not isinstance(complaint, dict):
         complaint = {}
     specialty = (
-        complaint.get("specialty")
-        or data.get("specialty_hint")
+        data.get("specialty_hint")
+        or complaint.get("specialty")
         or "general_practice"
     )
     specialty = str(specialty).lower().strip()

@@ -5,7 +5,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 2,
@@ -13,7 +17,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 3,
@@ -21,7 +29,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 4,
@@ -29,7 +41,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 5,
@@ -37,7 +53,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 6,
@@ -45,7 +65,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 7,
@@ -53,7 +77,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 8,
@@ -61,7 +89,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 9,
@@ -69,7 +101,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 10,
@@ -77,7 +113,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 11,
@@ -85,7 +125,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 12,
@@ -93,7 +137,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 13,
@@ -101,7 +149,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 14,
@@ -109,7 +161,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 15,
@@ -117,7 +173,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 16,
@@ -125,7 +185,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 17,
@@ -133,7 +197,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 18,
@@ -141,7 +209,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 19,
@@ -149,7 +221,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 20,
@@ -157,7 +233,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 21,
@@ -165,7 +245,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 22,
@@ -173,7 +257,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 23,
@@ -181,7 +269,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 24,
@@ -189,7 +281,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 25,
@@ -197,7 +293,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 26,
@@ -205,7 +305,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 27,
@@ -213,7 +317,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 28,
@@ -221,7 +329,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 29,
@@ -229,7 +341,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 30,
@@ -237,7 +353,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 31,
@@ -245,7 +365,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 32,
@@ -253,7 +377,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 33,
@@ -261,7 +389,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 34,
@@ -269,7 +401,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 35,
@@ -277,7 +413,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 36,
@@ -285,7 +425,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 37,
@@ -293,7 +437,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 38,
@@ -301,7 +449,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 39,
@@ -309,7 +461,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 40,
@@ -317,7 +473,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 41,
@@ -325,7 +485,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 42,
@@ -333,7 +497,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 43,
@@ -341,7 +509,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 44,
@@ -349,7 +521,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 45,
@@ -357,7 +533,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 46,
@@ -365,7 +545,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 47,
@@ -373,7 +557,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 48,
@@ -381,7 +569,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 49,
@@ -389,7 +581,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 50,
@@ -397,7 +593,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 51,
@@ -405,7 +605,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 52,
@@ -413,7 +617,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 53,
@@ -421,7 +629,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 54,
@@ -429,7 +641,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 55,
@@ -437,7 +653,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 56,
@@ -445,7 +665,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 57,
@@ -453,7 +677,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 58,
@@ -461,7 +689,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 59,
@@ -469,7 +701,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 60,
@@ -477,7 +713,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 61,
@@ -485,7 +725,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 62,
@@ -493,7 +737,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 63,
@@ -501,7 +749,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 64,
@@ -509,7 +761,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 65,
@@ -517,7 +773,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 66,
@@ -525,7 +785,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 67,
@@ -533,7 +797,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 68,
@@ -541,7 +809,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 69,
@@ -549,7 +821,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 70,
@@ -557,7 +833,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 71,
@@ -565,7 +845,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 72,
@@ -573,7 +857,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 73,
@@ -581,7 +869,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 74,
@@ -589,7 +881,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 75,
@@ -597,7 +893,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 76,
@@ -605,7 +905,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 77,
@@ -613,7 +917,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 78,
@@ -621,7 +929,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 79,
@@ -629,7 +941,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 80,
@@ -637,7 +953,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 81,
@@ -645,7 +965,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 82,
@@ -653,7 +977,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 83,
@@ -661,7 +989,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 84,
@@ -669,7 +1001,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 85,
@@ -677,7 +1013,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 86,
@@ -685,7 +1025,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 87,
@@ -693,7 +1037,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 88,
@@ -701,7 +1049,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 89,
@@ -709,7 +1061,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 90,
@@ -717,7 +1073,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 91,
@@ -725,7 +1085,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 92,
@@ -733,7 +1097,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 93,
@@ -741,7 +1109,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 94,
@@ -749,7 +1121,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 95,
@@ -757,7 +1133,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 96,
@@ -765,7 +1145,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 97,
@@ -773,7 +1157,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 98,
@@ -781,7 +1169,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 99,
@@ -789,7 +1181,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 100,
@@ -797,7 +1193,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 101,
@@ -805,7 +1205,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 102,
@@ -813,7 +1217,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 103,
@@ -821,7 +1229,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 104,
@@ -829,7 +1241,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 105,
@@ -837,7 +1253,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 106,
@@ -845,7 +1265,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 107,
@@ -853,7 +1277,11 @@
         "expected": {
             "Clinic": "gastroenterology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 108,
@@ -861,7 +1289,11 @@
         "expected": {
             "Clinic": "elderly",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 109,
@@ -869,7 +1301,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 110,
@@ -877,7 +1313,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 111,
@@ -885,7 +1325,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 112,
@@ -893,7 +1337,11 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 113,
@@ -901,7 +1349,11 @@
         "expected": {
             "Clinic": "orthopedics",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 114,
@@ -909,7 +1361,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 115,
@@ -917,7 +1373,11 @@
         "expected": {
             "Clinic": "dermatology",
             "Priority": "P2"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 116,
@@ -925,7 +1385,11 @@
         "expected": {
             "Clinic": "general_practice",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 117,
@@ -933,7 +1397,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 118,
@@ -941,7 +1409,11 @@
         "expected": {
             "Clinic": "neurology",
             "Priority": "P1"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 119,
@@ -949,7 +1421,11 @@
         "expected": {
             "Clinic": "chronic_diseases",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     },
     {
         "id": 120,
@@ -957,6 +1433,10 @@
         "expected": {
             "Clinic": "gynecology",
             "Priority": "P3"
-        }
+        },
+        "urgency_score": null,
+        "is_followup": false,
+        "time_pref": null,
+        "specialty_hint": null
     }
 ]

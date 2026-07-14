@@ -1,25 +1,28 @@
 """
-scheduler/scheduler.py — Tier-1 booking orchestration (real-time path only).
+scheduler/scheduler.py — Tier-1 booking orchestration (read-only preview path).
 
 Pipeline:
   request → classify → priority → fetch slots → block rules → wave rules
          → rank/select OR waitlist
 
+NOTE: The actual booking (DB writes) is handled by patient_fsm.py → crud.py.
+This module provides classification, ranking, and preview logic only.
 GA (Tier 2) and Monte Carlo (Tier 3) stay outside this module.
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import crud
-from database.models import Appointment, PatientProfile, Slot
+from database.models import Appointment, Doctor, PatientProfile, Slot
 from scheduler.classifier import classify_specialty, classify_with_gemini_fallback
 from scheduler.priority import score_and_classify
 
@@ -46,9 +49,15 @@ WAVE_HORIZON_DAYS: dict[str, int] = {
 }
 
 
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now, compatible with naive datetimes stored in DB."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 # ── Types (read-only DTOs) ────────────────────────────────────────────────────
 
 def _parse_doctor_id(notes: str | None) -> int | None:
+    """Legacy helper: extract doctor_id from notes text. Prefer Slot.doctor_id FK."""
     if not notes:
         return None
     for part in notes.split():
@@ -62,7 +71,7 @@ def _parse_doctor_id(notes: str | None) -> int | None:
 
 @dataclass(frozen=True)
 class AppointmentSlot:
-    """Immutable slot view. DB writes go through book_slot()."""
+    """Immutable slot view. Actual DB writes go through crud.reserve_slot_and_create_appointment()."""
 
     slot_id: int
     slot_datetime: datetime
@@ -74,13 +83,15 @@ class AppointmentSlot:
 
     @classmethod
     def from_orm(cls, row: Slot) -> AppointmentSlot:
+        # Prefer the ORM FK column; fall back to parsing notes for legacy data.
+        doctor_id = getattr(row, "doctor_id", None) or _parse_doctor_id(row.notes)
         return cls(
             slot_id=row.slot_id,
             slot_datetime=row.slot_datetime,
             specialty=row.specialty,
             priority_class=row.priority_class,
             status=row.status,
-            doctor_id=_parse_doctor_id(row.notes),
+            doctor_id=doctor_id,
             notes=row.notes,
         )
 
@@ -148,7 +159,7 @@ def sanitize_input(data: dict[str, Any]) -> dict[str, Any]:
         data["urgency_score"] = 0.3
 
     if "arrival_time" not in data:
-        data["arrival_time"] = datetime.utcnow().isoformat()
+        data["arrival_time"] = _utcnow().isoformat()
 
     return data
 
@@ -174,15 +185,13 @@ def clinic_load_by_day(db: Session, specialty: str) -> dict[tuple[str, date], in
 
 
 def doctor_load_by_day(db: Session) -> dict[tuple[int, date], int]:
-    loads: dict[tuple[int, date], int] = {}
-    stmt = select(Slot).where(Slot.status == "booked")
-    for row in db.scalars(stmt).all():
-        doc_id = _parse_doctor_id(row.notes)
-        if doc_id is None:
-            continue
-        key = (doc_id, row.slot_datetime.date())
-        loads[key] = loads.get(key, 0) + 1
-    return loads
+    """Count booked slots per doctor per day using the FK column directly."""
+    stmt = (
+        select(Slot.doctor_id, func.date(Slot.slot_datetime), func.count())
+        .where(Slot.status == "booked", Slot.doctor_id.isnot(None))
+        .group_by(Slot.doctor_id, func.date(Slot.slot_datetime))
+    )
+    return {(doc_id, day): count for doc_id, day, count in db.execute(stmt).all()}
 
 
 def slot_utilization_by_day(db: Session, specialty: str) -> dict[tuple[str, date], float]:
@@ -226,9 +235,18 @@ def get_available_slots(db: Session, specialty: str) -> list[AppointmentSlot]:
 
 
 def _query_slots(db: Session, specialty: str) -> list[Slot]:
+    """Fetch available future slots owned by an active doctor."""
+    now = _utcnow()
     stmt = (
         select(Slot)
-        .where(Slot.specialty == specialty, Slot.status == "available")
+        .join(Slot.doctor)
+        .options(joinedload(Slot.doctor))
+        .where(
+            Slot.specialty == specialty,
+            Slot.status == "available",
+            Slot.slot_datetime >= now,
+            Doctor.is_active.is_(True),
+        )
         .order_by(Slot.slot_datetime)
     )
     return list(db.scalars(stmt).all())
@@ -248,15 +266,33 @@ def apply_wave_rules(
     *,
     now: datetime | None = None,
 ) -> list[AppointmentSlot]:
-    now = now or datetime.utcnow()
+    """Restrict slots to the priority-class wave horizon.
+
+    Unlike the previous version, this does NOT fall back to all slots when
+    the wave window is empty.  An empty result means "no slots in your wave
+    horizon" and the caller should route to the waitlist.
+    """
+    now = now or _utcnow()
     horizon_days = WAVE_HORIZON_DAYS.get(priority_class, 7)
     wave_end = now + timedelta(days=horizon_days)
-    filtered = [s for s in slots if now <= s.slot_datetime <= wave_end]
-    return filtered or slots
+    return [s for s in slots if now <= s.slot_datetime <= wave_end]
 
 
 def book_slot(db: Session, slot: AppointmentSlot) -> None:
-    """Service-layer write: mark a slot as booked in the database."""
+    """Mark a slot as booked in the database.
+
+    .. deprecated::
+        This only marks the Slot row and does NOT create an Appointment record.
+        The correct booking path is ``crud.reserve_slot_and_create_appointment()``
+        which atomically checks conflicts, creates the Appointment, and marks
+        the slot as booked.  This function is kept for backward compatibility.
+    """
+    warnings.warn(
+        "book_slot() does not create an Appointment record. "
+        "Use crud.reserve_slot_and_create_appointment() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     row = db.get(Slot, slot.slot_id)
     if row is None:
         raise ValueError(f"Slot {slot.slot_id} not found")
@@ -399,7 +435,7 @@ def _load_queue(db: Session, specialty: str) -> list[WaitlistCandidate]:
                     appt.priority_class or "P3", 0.2
                 ),
                 urgency_score=0.3,
-                arrival_time=appt.created_at or datetime.utcnow(),
+                arrival_time=appt.created_at or _utcnow(),
                 telegram_id=tg_id,
             )
         )
@@ -455,7 +491,7 @@ def enqueue_waitlist(
     arrival_time: datetime | None = None,
     telegram_id: int | None = None,
 ) -> WaitlistEntry:
-    arrival = arrival_time or datetime.utcnow()
+    arrival = arrival_time or _utcnow()
     candidate = WaitlistCandidate(
         specialty=specialty,
         priority_class=priority_class,
@@ -498,11 +534,22 @@ async def _classify(data: dict[str, Any], gemini_client: Optional[object]) -> di
 
     return classify_specialty(complaint_text)
 
+
 async def plan_appointment(
     data: dict[str, Any],
     db: Session,
     gemini_client: Optional[object] = None,
 ) -> ScheduleDecision:
+    """Read-only preview: classify, score, rank slots, but do NOT book.
+
+    The actual booking (DB write) is done by the FSM via
+    ``crud.reserve_slot_and_create_appointment()`` which atomically checks
+    slot availability, patient booking conflicts (V4 policy), creates the
+    Appointment, and marks the slot as booked.
+
+    This function is safe to call multiple times without side effects
+    (except waitlist metadata when no slot is found).
+    """
     safe_data = sanitize_input(data)
 
     spec_result = await _classify(safe_data, gemini_client)
@@ -522,10 +569,11 @@ async def plan_appointment(
     try:
         arrival_time = datetime.fromisoformat(str(safe_data.get("arrival_time")))
     except (TypeError, ValueError):
-        arrival_time = datetime.utcnow()
+        arrival_time = _utcnow()
 
     telegram_id = safe_data.get("telegram_id") or safe_data.get("user_id")
 
+    # ── Slot search (read-only — no DB writes here) ──────────────────────
     available = get_available_slots(db, specialty)
     available = apply_block_rules(available, priority_class)
     available = apply_wave_rules(available, priority_class)

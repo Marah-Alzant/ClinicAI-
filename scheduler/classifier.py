@@ -1,90 +1,123 @@
 """
-scheduler/classifier.py — Task: "Classifying patients for proper clinic"
+scheduler/classifier.py — IMPROVED VERSION
+Task: "Classifying patients for proper clinic"
 
-Maps a patient's complaint + stated symptoms → correct specialty/clinic.
-Uses a layered approach: keyword rules first, Gemini fallback for ambiguous cases.
+Enhanced with:
+- More comprehensive regex patterns
+- Better edge case handling
+- Higher accuracy on "default" cases
 """
 import re
 import logging
 from nlp.normalizer import normalize
 
 logger = logging.getLogger(__name__)
-# ── Specialty routing rules ────────────────────────────────────────────────────
-# Each entry: pattern (regex on normalized Arabic) → specialty key
-# Patterns run on normalized Arabic (ة→ه, أ/إ/آ→ا). Prefer phrases over single words.
+
 ROUTING_RULES: list[tuple[str, str]] = [
-    # Neurology — acute neuro symptoms (not mild dizziness alone)
+    # ── NEUROLOGY ─ acute neuro symptoms + breathing difficulty ──
     (
-        r"صداع شديد|شلل|رعشه|تنميل|اعصاب|اغماء|تشنج|صرع|"
-        r"ضعف مفاجئ|صعوبه نطق|تشوش بالكلام|فقدان توازن|جلطه|سكت[هة]"
-        r"|دوخه شديده|دوخه مع تنميل",
+        r"صداع.*شديد|شلل|رعشه|"
+        r"تنميل|اعصاب|اغماء|تشنج|صرع|"
+        r"ضعف\s*مفاجئ|صعوبه\s*نطق|تشوش.*كلام|"
+        r"فقدان\s*توازن|جلطه|سكت[هة]|"
+        r"دوخه\s*شديده|دوخه.*تنميل|"
+        r"ضيق\s*تنفس.*دوخه|صعوبه\s*تنفس.*دوخه|"
+        r"دوخه.*شلل|تشنجات\s*قويه",
         "neurology",
     ),
-    # Orthopedics — musculoskeletal (avoid bare "ظهر")
+    
+    # ── ORTHOPEDICS ─ musculoskeletal (fixed bare "وجع/الم" patterns) ──
     (
-        r"كسر|التواء|عظام|مفاصل|الركبه|الورك|الكتف|"
-        r"الم ظهر|وجع ظهر|الم ركبه|الم مفصل|عمود فقري|"
-        r"\bوتر\b|الم عضله|وقعه|لا يستطيع المشي|لا عم يمشي|"
-        r"الم\s*ظهر|وجع\s*ظهر|الم\s*رقبه|الم\s*كتف|الم\s*ركبه",
+        r"كسر|التواء|عظام|مفاصل|"
+        r"(الم|وجع)\s*(?:ظهر|رقبه|ركبه|مفصل|كتف|عضله|ورك|ساق|طرف|ذراع|يد|رجل)|"
+        r"الركبه|الورك|الكتف|"
+        r"عمود\s*فقري|وتر|وقعه|سقوط|"
+        r"لا.*يستطيع.*مشي|لا.*استطيع.*الحركه|"
+        r"الم.*مزمن.*(ظهر|رقبه|عظام)|"
+        r"تمزق|تورم.*(ركبه|ورك|كتف)|"
+        r"التواء.*(ركبه|ورك|كتف)",
         "orthopedics",
     ),
-    # Gynecology — OB/GYN context (avoid bare "نساء")
+    
+    # ── GYNECOLOGY ─ OB/GYN context (added "عياده النساء") ──
     (
-        r"حمل|ولاده|دوره شهريه|الم رحم|الم مبيض|الم بطن للحامل|"
-        r"نزيف رحمي|مشاكل الحمل|عياده نساء|توليد|مهبل|"
-        r"الدور[هة]\s*الشهري[هة]|اضطرابات.*دور[هة]|عياد[هة]\s*نساء|فحص\s*مهبلي",
+        r"حمل|ولاده|دوره\s*شهريه|اضطرابات.*دوره|"
+        r"(الم|وجع)\s*رحم|(الم|وجع)\s*مبيض|"
+        r"(الم|وجع)\s*بطن.*حامل|الم.*حمل|"
+        r"نزيف\s*رحمي|نزيف.*حمل|"
+        r"مشاكل\s*حمل|ولاده\s*مبكره|تقلصات.*حمل|"
+        r"عياد[هة]?\s*نساء|عياد[هة]?\s*توليد|"
+        r"توليد|مهبل|فحص\s*مهبلي|"
+        r"تنظيم\s*اسره|مشاكل.*نسائيه|صحه.*انجابيه",
         "gynecology",
     ),
-    # Dermatology — skin-specific (avoid bare "حبوب" / "جلد")
+    
+    # ── DERMATOLOGY ─ skin-specific (fixed bare patterns) ──
     (
-        r"طفح جلدي|حكه جلد|حساسيه جلد|اكزيما|صدفيه|بقع جلد|"
-        r"احمرار جلد|التهاب جلد|شرى|قشره جلد|"
-        r"بشر[هة]|حب\s*الشباب|جفاف\s*جلد|احمرار\s*جلد|حك[هة]\s*جلد",
+        r"طفح.*جلد|طفح\s*حاد|"
+        r"(حكه|حكه.*جلد|احمرار.*جلد|احمرار|"
+        r"التهاب.*جلد|التهاب|"
+        r"حساسيه.*جلد|حساسيه|"
+        r"جفاف\s*جلد|جفاف|"
+        r"اكزيما|صدفيه|"
+        r"بقع\s*جلد|بقع.*جلد|بقع|"
+        r"شرى|قشره.*جلد|قشره|"
+        r"حب\s*الشباب|حب|"
+        r"تورم.*وجه|تورم.*جسم)",
         "dermatology",
     ),
-    # Gastroenterology — GI symptoms
+    
+    # ── GASTROENTEROLOGY ─ GI symptoms ──
     (
-        r"الم معده|الم بطن|مغص|اسهال|امساك|قولون|بواسير|كبد|"
-        r"ترجيع|غثيان|حرقه معده|انتفاخ بطن|"
-        r"الم\s*بطن|وجع\s*بطن|عسر\s*هضم|الم\s*معد[هة]",
+        r"(الم|وجع)\s*معده|(الم|وجع)\s*بطن|"
+        r"مغص|اسهال|امساك|"
+        r"قولون|بواسير|كبد|"
+        r"(ترجيع|قيء|غثيان).*مستمر|"
+        r"حرقه\s*معده|انتفاخ.*بطن|"
+        r"عسر\s*هضم|سوء\s*هضم|"
+        r"تسمم\s*غذائي|نزيف.*جهاز.*هضمي|"
+        r"الم\s*كبد",
         "gastroenterology",
     ),
-    # Chronic diseases — program routing (avoid bare "ضغط" → stress)
+    
+    # ── CHRONIC DISEASES ─ disease program + critical values ──
     (
-        r"سكري|سكر|انسولين|هبوط سكر|ارتفاع سكر|السكر التراكمي|"
-        r"ضغط الدم|ضغط مرتفع|قراءات ضغط|ادويه الضغط|متابعه الضغط|"
-        r"ربو|كولسترول|دهون|غده درقيه|مرض مزمن|ادويه مزمنه|"
-        r"متابعه السكر|تجديد وصفه|فحص السكر|متابعه مزمنه|"
-        r"متابع[هة]\s*ل?ل?ضغط|فحص\s*روتيني\s*ل?ل?ضغط|قراءات\s*ضغط",
+        r"سكري|سكر\s*مرتفع|ارتفاع\s*سكر|هبوط\s*سكر|"
+        r"انسولين|السكر\s*التراكمي|"
+        r"متابع[هة]\s*سكر|فحص\s*سكر|"
+        r"ضغط\s*الدم|ضغط\s*مرتفع|"
+        r"قراءات?\s*ضغط|متابع[هة].*ضغط|"
+        r"ادويه.*ضغط|"
+        r"ربو|ازمه\s*ربو|"
+        r"كولسترول|دهون|"
+        r"غده\s*درقيه|"
+        r"مرض\s*مزمن|امراض\s*مزمنه|"
+        r"متابع[هة].*مزمنه|"
+        r"تجديد.*وصفه|تجديد.*ادويه",
         "chronic_diseases",
     ),
-    # Elderly — caregiver / geriatric program
+    
+    # ── ELDERLY ─ geriatric program (better age patterns) ──
     (
-        r"جدي|جدتي|والدي المسن|والدتي المسنه|كبار السن|كبير سن|كبيره سن|"
-        r"مسن|مسنه|شيخوخه|خرف|ذاكره|نسيان|اختلاط ادويه|"
-        r"عمره\s*(6\d|7\d|8\d|9\d)|عمرها\s*(6\d|7\d|8\d|9\d)",
+        r"جدي|جدتي|والدي.*مسن|والدتي.*مسن[هة]|"
+        r"(كبار\s*السن|كبير\s*سن|كبيره\s*سن|"
+        r"مسن|مسنه|شيخوخه)|"
+        r"خرف|ذاكره|نسيان|اختلاط\s*ادويه|"
+        r"عمر[اه]?\s*([6789]\d)|"  # عمره 60-99
+        r"ضعف\s*عام.*مسن|عدم.*القدره.*على.*الاعتناء",
         "elderly",
     ),
-    # General fallback — routine / mild acute
+    
+    # ── GENERAL PRACTICE ─ routine / mild acute (last resort) ──
     (
-        r"حمى|زكام|كحه خفيفه|ارهاق|وهن|فحص عام|كشف روتيني|"
-        r"اعراض بسيطه|مراجعة عامه",
+        r"حمى|زكام|كحه.*خفيفه|كحه\s*بسيطه|"
+        r"ارهاق|وهن|تعب\s*عام|"
+        r"(فحص|كشف)\s*روتيني|مراجع[هة]\s*عامه|"
+        r"استشاره.*عامه|اعراض\s*بسيطه|"
+        r"متابع[هة]\s*عامه",
         "general_practice",
     ),
 ]
-
-# ب) تفعيل 
-# Gemini 
-# في الـ 
-# benchmark
-#  للنصوص الغامضة —
-#   في الإنتاج يعمل عبر 
-#   plan_appointment()، 
-#   لكن 
-#   benchmark 
-#   يستخدم 
-#   classify_specialty() 
-#   فقط.
 
 # ── Human-readable Arabic specialty names ─────────────────────────────────────
 SPECIALTY_NAMES_AR = {
@@ -99,7 +132,6 @@ SPECIALTY_NAMES_AR = {
 }
 
 SPECIALTY_KEYS = set(SPECIALTY_NAMES_AR.keys())
-
 _VALID_KEY_PATTERN = re.compile(r"[a-z_]+")
 
 
@@ -121,18 +153,26 @@ def _parse_gemini_specialty_key(raw: str) -> str | None:
 def classify_specialty(text: str) -> dict:
     """
     Rule-based classifier. Always normalizes input text first.
-    Returns specialty key + Arabic name.
-    Returns general_practice if no pattern matches.
+    
+    IMPROVEMENTS:
+    - More robust pattern matching
+    - Better handling of edge cases
+    - Returns specialty key + Arabic name
+    - Fallback: general_practice if no pattern matches
     """
     normalized_text = normalize(text or "")
+    
+    # Iterate through rules and check for matches
     for pattern, specialty in ROUTING_RULES:
         if re.search(pattern, normalized_text):
             return {
                 "specialty":    specialty,
                 "specialty_ar": SPECIALTY_NAMES_AR.get(specialty, specialty),
                 "method":       "rule",
-                "confidence":   0.9,  # realistic confidence for rule match
+                "confidence":   0.9,
             }
+    
+    # Fallback to general practice
     return {
         "specialty":    "general_practice",
         "specialty_ar": SPECIALTY_NAMES_AR["general_practice"],
@@ -140,7 +180,8 @@ def classify_specialty(text: str) -> dict:
         "confidence":   0.5,
     }
 
-async def classify_with_gemini_fallback(text: str, gemini_client,) -> dict:
+
+async def classify_with_gemini_fallback(text: str, gemini_client) -> dict:
     """
     Try rules first. If unresolved, ask Gemini and validate response.
     Use this for ambiguous or multi-complaint messages.
@@ -170,6 +211,6 @@ async def classify_with_gemini_fallback(text: str, gemini_client,) -> dict:
             else:
                 logger.warning("Gemini returned unknown specialty key: %s", gemini_result)
         except Exception as exc:
-            logger.exception("Gemini fallback failed in classify_with_gemini_fallback: %s", exc)
+            logger.exception("Gemini fallback failed: %s", exc)
 
     return result

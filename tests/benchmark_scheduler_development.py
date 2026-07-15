@@ -75,13 +75,13 @@ def predict_case(row: dict) -> dict:
     data = {
         "complaint": {
             "raw": text,
-            "urgency_score": urgency,
+            "urgency_score": row.get("urgency_score", 0.2), # القيمة الحقيقية
             "specialty": pred_clinic,
         },
-        "urgency_score": urgency,
-        "is_followup": ("متابعة" in text or "دوري" in text or "روتيني" in text),
-        "specialty_hint": pred_clinic,
-        "time_pref": {"date": None, "phrase": "أي وقت"},
+        "urgency_score": row.get("urgency_score", 0.2),
+        "is_followup": row.get("is_followup", False),
+        "specialty_hint": row.get("specialty_hint", pred_clinic),
+        "time_pref": row.get("time_pref", {"date": None}),
     }
     pr = score_and_classify(data)
 
@@ -91,6 +91,7 @@ def predict_case(row: dict) -> dict:
         "method": cls.get("method", "unknown"),
         "confidence": cls.get("confidence", 0.0),
         "priority_score": pr.score,
+        "breakdown": pr.breakdown,
     }
 
 
@@ -130,6 +131,7 @@ def run():
                 "method": method,
                 "confidence": confidence,
                 "priority_score": result["priority_score"],
+                "breakdown": result["breakdown"],
             })
 
     n = len(TEST_DATASET)
@@ -151,6 +153,7 @@ def run():
                 f"method={w['method']} confidence={w['confidence']:.2f} "
                 f"priority_score={w['priority_score']:.3f} | {w['text']}"
             )
+            print(f"Details   : {w['breakdown']}") # print f1, f2, f3, f4, f5
 
     perf = measure_performance(TEST_DATASET, run_one_case, warmup=5)
 

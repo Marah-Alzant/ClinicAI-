@@ -24,7 +24,7 @@ if TTS_RESPONSE_MODE not in {"text", "voice", "both", "auto"}:
     TTS_RESPONSE_MODE = "auto"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 CLINIC_NAME = os.getenv("CLINIC_NAME", "العيادة")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")

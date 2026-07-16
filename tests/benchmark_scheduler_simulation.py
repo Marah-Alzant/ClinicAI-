@@ -28,24 +28,11 @@ from scheduler.scheduler import _classify, normalize_priority_class, sanitize_in
 import json
 import os
 
-with open(os.path.join(os.path.dirname(__file__), "benchmarks.json"), "r", encoding="utf-8") as f:
+with open(os.path.join(os.path.dirname(__file__), "data/benchmarks.json"), "r", encoding="utf-8") as f:
     TEST_DATASET = json.load(f)
 
 
-def infer_urgency_score(text: str) -> float:
-    t = text
-    high = ["الآن", "فجأة", "حاد", "شديد", "صعوبة نطق", "ضعف مفاجئ", "وقع", "أزمة", "هبوط سكر"]
-    mid = ["دوخة", "تعب", "تنميل", "صفير", "تورم", "رجفة"]
-    low = ["متابعة", "دوري", "روتيني", "مراجعة", "بدون أعراض جديدة"]
-
-    if any(k in t for k in high):
-        return 0.9
-    if any(k in t for k in mid):
-        return 0.55
-    if any(k in t for k in low):
-        return 0.25
-    return 0.4
-
+from tests.helpers import infer_urgency_score
 
 def _build_patient_data(text: str) -> dict:
     """Build FSM-like payload, then sanitize like plan_appointment()."""

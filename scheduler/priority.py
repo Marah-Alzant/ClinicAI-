@@ -6,7 +6,6 @@ then maps that score to a priority class (P1 / P2 / P3).
 All weights are expert-defined and sum to 1.0.
 """
 from dataclasses import dataclass
-from nlp.normalizer import normalize
 from datetime import date
 from typing import Dict, Any
 

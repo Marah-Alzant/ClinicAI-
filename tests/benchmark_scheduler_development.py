@@ -12,24 +12,11 @@ import logging
 
 logging.getLogger("scheduler.classifier").setLevel(logging.CRITICAL)
 
-with open(os.path.join(os.path.dirname(__file__), "benchmarks.json"), "r", encoding="utf-8") as f:
+with open(os.path.join(os.path.dirname(__file__), "data/benchmarks.json"), "r", encoding="utf-8") as f:
     TEST_DATASET = json.load(f)
 
 
-def infer_urgency_score(text: str) -> float:
-    t = text
-    high = ["الآن", "فجأة", "حاد", "شديد", "صعوبة نطق", "ضعف مفاجئ", "وقع", "أزمة", "هبوط سكر"]
-    mid = ["دوخة", "تعب", "تنميل", "صفير", "تورم", "رجفة"]
-    low = ["متابعة", "دوري", "روتيني", "مراجعة", "بدون أعراض جديدة"]
-
-    if any(k in t for k in high):
-        return 0.9
-    if any(k in t for k in mid):
-        return 0.55
-    if any(k in t for k in low):
-        return 0.25
-    return 0.4
-
+from tests.helpers import infer_urgency_score
 def measure_performance(dataset, run_case_fn, warmup: int = 5):
     """
     Measures benchmark runtime stats.
@@ -67,13 +54,13 @@ def measure_performance(dataset, run_case_fn, warmup: int = 5):
         "median_case_ms": round(median(per_case_times), 3) if per_case_times else 0.0,
         "p95_case_ms": round(sorted(per_case_times)[int(0.95 * (len(per_case_times)-1))], 3) if per_case_times else 0.0,
         "throughput_cases_per_sec": round(throughput, 2),
-    }            
+    }
 
 def predict_case(row: dict) -> dict:
     """Run classifier + priority for one benchmark row."""
     text = row["input"]
     cls = classify_specialty(text)
-    
+
     if cls.get("method") == "default" and gemini is not None and getattr(gemini, "_available", False):
         try:
             cls_gemini = asyncio.run(classify_with_gemini_fallback(text, gemini))
@@ -88,13 +75,13 @@ def predict_case(row: dict) -> dict:
     data = {
         "complaint": {
             "raw": text,
-            "urgency_score": urgency,
+            "urgency_score": row.get("urgency_score", 0.2), # القيمة الحقيقية
             "specialty": pred_clinic,
         },
-        "urgency_score": urgency,
-        "is_followup": ("متابعة" in text or "دوري" in text or "روتيني" in text),
-        "specialty_hint": pred_clinic,
-        "time_pref": {"date": None, "phrase": "أي وقت"},
+        "urgency_score": row.get("urgency_score", 0.2),
+        "is_followup": row.get("is_followup", False),
+        "specialty_hint": row.get("specialty_hint", pred_clinic),
+        "time_pref": row.get("time_pref", {"date": None}),
     }
     pr = score_and_classify(data)
 
@@ -104,6 +91,7 @@ def predict_case(row: dict) -> dict:
         "method": cls.get("method", "unknown"),
         "confidence": cls.get("confidence", 0.0),
         "priority_score": pr.score,
+        "breakdown": pr.breakdown,
     }
 
 
@@ -143,6 +131,7 @@ def run():
                 "method": method,
                 "confidence": confidence,
                 "priority_score": result["priority_score"],
+                "breakdown": result["breakdown"],
             })
 
     n = len(TEST_DATASET)
@@ -164,6 +153,7 @@ def run():
                 f"method={w['method']} confidence={w['confidence']:.2f} "
                 f"priority_score={w['priority_score']:.3f} | {w['text']}"
             )
+            print(f"Details   : {w['breakdown']}") # print f1, f2, f3, f4, f5
 
     perf = measure_performance(TEST_DATASET, run_one_case, warmup=5)
 

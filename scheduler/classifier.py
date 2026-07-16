@@ -1,11 +1,9 @@
 """
-scheduler/classifier.py — IMPROVED VERSION
-Task: "Classifying patients for proper clinic"
+scheduler/classifier.py — Arabic text → medical specialty routing.
 
-Enhanced with:
-- More comprehensive regex patterns
-- Better edge case handling
-- Higher accuracy on "default" cases
+Uses regex-based rules on normalized Arabic text to match patient
+complaints to one of 8 clinic specialties. Falls back to Gemini
+LLM when no rule matches (async path).
 """
 import re
 import logging

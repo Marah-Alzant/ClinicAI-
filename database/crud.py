@@ -4,6 +4,8 @@ from datetime import datetime, date, timedelta
 from uuid import uuid4
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.orm import Session, joinedload
+from utils.datetime_utils import utcnow
+from utils.datetime_utils import utcnow
 from .models import (
     Patient,
     Doctor,
@@ -13,6 +15,7 @@ from .models import (
     Slot,
     Conversation,
     PatientProfile,
+    FsmSession,
 )
 
 
@@ -23,7 +26,7 @@ APPOINTMENT_DURATION_MINUTES = 30
 # ── IDs / helpers ──────────────────────────────────────────────────────────────
 
 def _ensure_appt_id(appt_data: dict) -> str:
-    return appt_data.get("appt_id") or f"appt_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:6]}"
+    return appt_data.get("appt_id") or f"appt_{utcnow().strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:6]}"
 
 
 def _complaint_raw(data: dict) -> str | None:
@@ -37,11 +40,9 @@ def _complaint_raw(data: dict) -> str | None:
 
 def _allowed_slot_priorities(priority_class: str | None) -> list[str | None]:
     """Reserved-capacity policy: urgent can use any slot; routine cannot take urgent reserves."""
-    if priority_class == "P1":
-        return ["P1", "P2", "P3", None]
-    if priority_class == "P2":
-        return ["P2", "P3", None]
-    return ["P3", None]
+    from scheduler.slot_policy import allowed_slot_priorities
+
+    return list(allowed_slot_priorities(priority_class))
 
 
 def _priority_rank_case(priority_class: str | None) -> int:
@@ -66,7 +67,7 @@ def _build_patient_profile_payload(data: dict) -> dict:
         "last_time_preference": data.get("time_pref"),
         "is_followup": bool(data.get("is_followup")),
         "updated_from": "patient_fsm",
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": utcnow().isoformat(),
     }
 
 
@@ -177,17 +178,19 @@ def find_patient_booking_conflict(
 def _first_slot_without_patient_conflict(db: Session, stmt, patient_id: int | None):
     """Return the earliest slot that does not conflict with the patient's active bookings."""
     for slot in db.scalars(stmt.limit(100)).all():
-        if patient_id and find_patient_booking_conflict(db, patient_id, slot.slot_datetime, slot.specialty):
+        if patient_id and _slot_conflicts_with_patient(db, patient_id, slot):
             continue
         return slot
     return None
 
 
+def _slot_conflicts_with_patient(db: Session, patient_id: int, slot: Slot) -> bool:
+    """True when booking this slot would violate patient booking policy."""
+    specialty = slot.doctor.specialty if slot.doctor else slot.specialty
+    return bool(find_patient_booking_conflict(db, patient_id, slot.slot_datetime, specialty))
+
+
 # ── Doctors / patients ────────────────────────────────────────────────────────
-
-def get_doctor_by_telegram(db: Session, telegram_id: int):
-    return db.scalar(select(Doctor).where(Doctor.telegram_id == telegram_id))
-
 
 def get_or_create_patient(db: Session, telegram_id: int, name: str | None = None):
     patient = db.scalar(select(Patient).where(Patient.telegram_id == telegram_id))
@@ -197,7 +200,7 @@ def get_or_create_patient(db: Session, telegram_id: int, name: str | None = None
             patient.name = name
             changed = True
         if hasattr(patient, "updated_at"):
-            patient.updated_at = datetime.utcnow()
+            patient.updated_at = utcnow()
             changed = True
         if changed:
             db.add(patient)
@@ -205,11 +208,15 @@ def get_or_create_patient(db: Session, telegram_id: int, name: str | None = None
             db.refresh(patient)
         return patient
 
-    patient = Patient(telegram_id=telegram_id, name=name, updated_at=datetime.utcnow())
+    patient = Patient(telegram_id=telegram_id, name=name, updated_at=utcnow())
     db.add(patient)
     db.flush()
     db.refresh(patient)
     return patient
+
+
+def get_patient_by_telegram_id(db: Session, telegram_id: int):
+    return db.scalar(select(Patient).where(Patient.telegram_id == telegram_id))
 
 
 def search_patient(db: Session, q: str):
@@ -363,7 +370,7 @@ def get_or_create_conversation(
             conversation.first_name = first_name
         if last_name and conversation.last_name != last_name:
             conversation.last_name = last_name
-        conversation.updated_at = datetime.utcnow()
+        conversation.updated_at = utcnow()
         db.add(conversation)
         db.flush()
         return conversation
@@ -408,7 +415,7 @@ def _slot_query(
     doctor_id: int | None = None,
 ):
     """Build a slot query owned by an active doctor/clinic."""
-    now = datetime.utcnow()
+    now = utcnow()
     specialties = [specialty]
     if allow_general_fallback and specialty != "general_practice":
         specialties.append("general_practice")
@@ -447,6 +454,63 @@ def _slot_query(
     )
 
 
+def find_available_slots(
+    db: Session,
+    specialty: str,
+    priority_class: str,
+    preferred_date: str | None = None,
+    patient_id: int | None = None,
+    telegram_id: int | None = None,
+    doctor_id: int | None = None,
+    *,
+    limit: int = 3,
+) -> list:
+    """Return up to `limit` candidate slots (same logic as find_next_available_slot)."""
+    from config import USE_SLOT_POLICY
+
+    patient_id = patient_id or (_patient_id_for_telegram(db, telegram_id) if telegram_id else None)
+
+    if USE_SLOT_POLICY:
+        from scheduler.slot_policy import select_slots
+
+        return select_slots(
+            db,
+            specialty=specialty,
+            priority_class=priority_class,
+            preferred_date=preferred_date,
+            patient_id=patient_id,
+            doctor_id=doctor_id,
+            limit=limit,
+            conflict_checker=_slot_conflicts_with_patient,
+        )
+
+    seen: set[int] = set()
+    results = []
+
+    def _collect(stmt):
+        nonlocal results
+        for row in db.scalars(stmt).all():
+            if row.slot_id in seen:
+                continue
+            if patient_id and _slot_conflicts_with_patient(db, patient_id, row):
+                continue
+            seen.add(row.slot_id)
+            results.append(row)
+            if len(results) >= limit:
+                return
+
+    if priority_class != "P1" and preferred_date:
+        _collect(_slot_query(specialty, priority_class, preferred_date, doctor_id=doctor_id))
+    if len(results) < limit:
+        _collect(_slot_query(specialty, priority_class, doctor_id=doctor_id))
+    if len(results) < limit and specialty != "general_practice":
+        if priority_class != "P1" and preferred_date:
+            _collect(_slot_query(specialty, priority_class, preferred_date, allow_general_fallback=True, doctor_id=doctor_id))
+        if len(results) < limit:
+            _collect(_slot_query(specialty, priority_class, allow_general_fallback=True, doctor_id=doctor_id))
+    return results
+
+
 def find_next_available_slot(
     db: Session,
     specialty: str,
@@ -460,7 +524,22 @@ def find_next_available_slot(
     Read-only lookup used by FSM preview.
     The final booking re-checks the slot and patient conflicts inside reserve_slot_and_create_appointment().
     """
+    from config import USE_SLOT_POLICY
+
     patient_id = patient_id or (_patient_id_for_telegram(db, telegram_id) if telegram_id else None)
+
+    if USE_SLOT_POLICY:
+        from scheduler.slot_policy import select_best_slot
+
+        return select_best_slot(
+            db,
+            specialty=specialty,
+            priority_class=priority_class,
+            preferred_date=preferred_date,
+            patient_id=patient_id,
+            doctor_id=doctor_id,
+            conflict_checker=_slot_conflicts_with_patient,
+        )
 
     # P1 should get the earliest safe slot; P2/P3 first try user's preferred date.
     if priority_class != "P1" and preferred_date:
@@ -515,6 +594,10 @@ def reserve_slot_and_create_appointment(db: Session, data: dict, slot_id: int | 
         if slot is None or slot.status != "available" or slot.doctor is None or not slot.doctor.is_active:
             return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
 
+        patient_priority = data.get("priority_class")
+        if slot.priority_class not in set(_allowed_slot_priorities(patient_priority)):
+            return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
+
     appt_datetime = slot.slot_datetime if slot else None
     requested_specialty = data.get("specialty_hint") or data.get("specialty")
     specialty = slot.doctor.specialty if slot and slot.doctor else requested_specialty
@@ -523,15 +606,6 @@ def reserve_slot_and_create_appointment(db: Session, data: dict, slot_id: int | 
         conflict = find_patient_booking_conflict(db, patient.patient_id, appt_datetime, specialty)
         if conflict:
             return {"appointment": None, "slot_conflict": False, "booking_conflict": conflict}
-
-def create_appointment(db: Session, data: dict, slot: object, patient: Patient):
-    from scheduler.scheduler import AppointmentSlot, book_slot
-
-    appt_id = _ensure_appt_id(data)
-    if isinstance(slot, AppointmentSlot):
-        appt_datetime = slot.slot_datetime
-    else:
-        appt_datetime = getattr(slot, "slot_datetime", None)
 
     status = "confirmed" if appt_datetime else "waitlisted"
     appointment = Appointment(
@@ -546,23 +620,13 @@ def create_appointment(db: Session, data: dict, slot: object, patient: Patient):
         complaint_summary=_complaint_raw(data),
         time_preference=data.get("time_pref"),
         status=status,
-        updated_at=datetime.utcnow(),
+        updated_at=utcnow(),
     )
     if slot is not None and appt_datetime is not None:
-        try:
-            if isinstance(slot, AppointmentSlot):
-                book_slot(db, slot)
-            else:
-                slot.status = "booked"
-                db.add(slot)
-                db.commit()
-        except Exception:
-            pass
-    db.add(appointment)
-    if slot:
         slot.status = "booked"
-        slot.updated_at = datetime.utcnow()
+        slot.updated_at = utcnow()
         db.add(slot)
+    db.add(appointment)
     db.flush()
     db.refresh(appointment)
     return {"appointment": appointment, "slot_conflict": False, "booking_conflict": None}
@@ -639,12 +703,12 @@ def update_appointment_status(db: Session, appt_id: str, status: str):
 
     old_status = appt.status
     appt.status = status
-    appt.updated_at = datetime.utcnow()
+    appt.updated_at = utcnow()
 
     # Cancelled appointments release their slot; completed/no_show keep historical slot booked.
     if status == "cancelled" and appt.slot is not None:
         appt.slot.status = "available"
-        appt.slot.updated_at = datetime.utcnow()
+        appt.slot.updated_at = utcnow()
         db.add(appt.slot)
 
     db.add(appt)
@@ -662,9 +726,13 @@ def _clean_name(value: str | None) -> str | None:
 
 def find_patient_by_name(db: Session, patient_name: str | None):
     """Best-effort lookup used when the doctor note mentions a patient by name."""
+    from nlp.normalizer import normalize
+
     patient_name = _clean_name(patient_name)
     if not patient_name:
         return None
+
+    norm_query = normalize(patient_name)
 
     exact_stmt = (
         select(Patient)
@@ -682,7 +750,20 @@ def find_patient_by_name(db: Session, patient_name: str | None):
         .order_by(desc(Patient.updated_at), desc(Patient.created_at))
         .limit(1)
     )
-    return db.scalar(fuzzy_stmt)
+    patient = db.scalar(fuzzy_stmt)
+    if patient:
+        return patient
+
+    # Arabic orthography differs between NLP normalization and stored names.
+    for candidate in db.scalars(
+        select(Patient).order_by(desc(Patient.updated_at), desc(Patient.created_at))
+    ).all():
+        if not candidate.name:
+            continue
+        norm_stored = normalize(candidate.name)
+        if norm_stored == norm_query or norm_query in norm_stored or norm_stored in norm_query:
+            return candidate
+    return None
 
 
 def find_appointment_for_session(
@@ -783,7 +864,7 @@ def create_session(db: Session, session_data: dict, doctor_id: int):
     # A saved clinical session means the related visit was completed.
     if appointment and appointment.status in {"confirmed", "arrived"}:
         appointment.status = "completed"
-        appointment.updated_at = datetime.utcnow()
+        appointment.updated_at = utcnow()
         db.add(appointment)
 
     db.commit()
@@ -798,6 +879,10 @@ def get_doctors(db: Session, active_only: bool = False):
     if active_only:
         stmt = stmt.where(Doctor.is_active.is_(True))
     return db.scalars(stmt).all()
+
+
+def get_doctor_by_telegram(db: Session, telegram_id: int) -> Doctor | None:
+    return db.scalar(select(Doctor).where(Doctor.telegram_id == telegram_id))
 
 
 def get_doctor_slots(db: Session, target: date | None = None, doctor_id: int | None = None):
@@ -919,11 +1004,11 @@ def create_session_from_dashboard(db: Session, session_data: dict):
         investigations=_dashboard_list(session_data.get("investigations"), "name_ar"),
         followup_days=followup_days,
         raw_transcription=session_data.get("raw_transcription"),
-        session_datetime=appointment.appt_datetime or datetime.utcnow(),
+        session_datetime=appointment.appt_datetime or utcnow(),
     )
     db.add(session)
     appointment.status = "completed"
-    appointment.updated_at = datetime.utcnow()
+    appointment.updated_at = utcnow()
     db.add(appointment)
     db.commit()
     db.refresh(session)
@@ -949,7 +1034,7 @@ def log_message(
         message_type=message_type,
         content=content,
     )
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = utcnow()
     db.add(conversation)
     db.add(log)
     db.commit()
@@ -982,7 +1067,7 @@ def upsert_profile(db: Session, telegram_id: int, data: dict, patient_id: int | 
     profile.data = merged
     if patient_id and not profile.patient_id:
         profile.patient_id = patient_id
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = utcnow()
     db.add(profile)
     db.flush()
     db.refresh(profile)
@@ -994,5 +1079,78 @@ def delete_profile(db: Session, telegram_id: int) -> bool:
     if not profile:
         return False
     db.delete(profile)
+    db.commit()
+    return True
+
+
+# ── FSM session persistence ───────────────────────────────────────────────────
+
+FSM_SESSION_TTL_HOURS = 24
+
+
+def cleanup_stale_fsm_sessions(db: Session, *, ttl_hours: int = FSM_SESSION_TTL_HOURS) -> int:
+    cutoff = utcnow() - timedelta(hours=ttl_hours)
+    rows = db.scalars(select(FsmSession).where(FsmSession.updated_at < cutoff)).all()
+    count = len(rows)
+    for row in rows:
+        db.delete(row)
+    if count:
+        db.commit()
+    return count
+
+
+def get_fsm_session(db: Session, telegram_id: int, role: str = "patient") -> FsmSession | None:
+    return db.scalar(
+        select(FsmSession).where(FsmSession.telegram_id == telegram_id, FsmSession.role == role)
+    )
+
+
+def upsert_fsm_session(
+    db: Session,
+    telegram_id: int,
+    *,
+    role: str,
+    state: str,
+    data_json: dict | None = None,
+    slot_options_json: list | None = None,
+    slot_index: int = 0,
+    slot_json: dict | None = None,
+    priority_json: dict | None = None,
+    finalized_appointment_id: str | None = None,
+) -> FsmSession:
+    row = get_fsm_session(db, telegram_id, role=role)
+    if row is None:
+        row = FsmSession(
+            telegram_id=telegram_id,
+            role=role,
+            state=state,
+            data_json=data_json or {},
+            slot_options_json=slot_options_json or [],
+            slot_index=slot_index,
+            slot_json=slot_json,
+            priority_json=priority_json,
+            finalized_appointment_id=finalized_appointment_id,
+        )
+        db.add(row)
+    else:
+        row.state = state
+        row.data_json = data_json if data_json is not None else row.data_json
+        row.slot_options_json = slot_options_json if slot_options_json is not None else row.slot_options_json
+        row.slot_index = slot_index
+        row.slot_json = slot_json if slot_json is not None else row.slot_json
+        row.priority_json = priority_json if priority_json is not None else row.priority_json
+        row.finalized_appointment_id = finalized_appointment_id
+        row.updated_at = utcnow()
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_fsm_session(db: Session, telegram_id: int, role: str = "patient") -> bool:
+    row = get_fsm_session(db, telegram_id, role=role)
+    if not row:
+        return False
+    db.delete(row)
     db.commit()
     return True

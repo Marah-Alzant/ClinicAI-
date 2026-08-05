@@ -978,3 +978,65 @@ def delete_profile(db: Session, telegram_id: int) -> bool:
     db.delete(profile)
     db.commit()
     return True
+
+
+# ── FIX (2026-07-14): helpers for specialty availability + modify-before-confirm ──
+
+def get_available_specialties(db: Session) -> set[str]:
+    """Distinct specialties that have at least one active doctor (used by the FSM
+    to tell the patient when a requested clinic does not exist, instead of looping)."""
+    rows = db.scalars(
+        select(Doctor.specialty).where(Doctor.is_active.is_(True)).distinct()
+    ).all()
+    return {r for r in rows if r}
+
+
+def find_alternative_slot(
+    db: Session,
+    specialty: str,
+    priority_class: str,
+    preferred_date: str | None = None,
+    preferred_hour: int | None = None,
+    preferred_minute: int = 0,
+    exclude_slot_ids: list[int] | None = None,
+    telegram_id: int | None = None,
+):
+    """
+    Used when the patient asks to modify the offered time before confirming.
+    Same safety rules as find_next_available_slot (active doctor, no patient
+    conflict), plus: exclude already-rejected slots and, when a target hour is
+    given, prefer the slot closest to that hour.
+    """
+    patient_id = _patient_id_for_telegram(db, telegram_id) if telegram_id else None
+    exclude = set(exclude_slot_ids or [])
+
+    def _pick(stmt):
+        if exclude:
+            stmt = stmt.where(Slot.slot_id.notin_(exclude))
+        slots = db.scalars(stmt.limit(80)).unique().all()
+        if preferred_hour is not None and slots:
+            target = preferred_hour * 60 + (preferred_minute or 0)
+            slots = sorted(
+                slots,
+                key=lambda s: (
+                    abs(s.slot_datetime.hour * 60 + s.slot_datetime.minute - target),
+                    s.slot_datetime,
+                ),
+            )
+        for s in slots:
+            spec = s.doctor.specialty if s.doctor else specialty
+            if patient_id and find_patient_booking_conflict(db, patient_id, s.slot_datetime, spec):
+                continue
+            return s
+        return None
+
+    if preferred_date:
+        slot = _pick(_slot_query(specialty, priority_class, preferred_date))
+        if slot:
+            return slot
+    slot = _pick(_slot_query(specialty, priority_class))
+    if slot:
+        return slot
+    if specialty != "general_practice":
+        return _pick(_slot_query(specialty, priority_class, allow_general_fallback=True))
+    return None

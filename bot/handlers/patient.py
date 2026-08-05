@@ -136,7 +136,10 @@ def _log_outbound(user_id: int, reply: str, voice_sent: bool = False) -> None:
 def _menu_response(user_id: int, text: str):
     """Return (reply, keyboard) for main-menu commands, or None."""
     if _is_repeat_request(text):
-        _get_fsm(user_id, reset=True)
+        # FIX (2026-07-14): begin_booking() moves the FSM to COLLECT_NAME so the
+        # patient's next message is accepted as the name (previously the FSM
+        # stayed in GREETING and asked for the name a second time).
+        _get_fsm(user_id, reset=True).begin_booking()
         return "📅 تمام، خلينا نبدأ حجز جديد. ما اسمك الكريم؟", None
 
     if _is_inquiry_request(text):
@@ -287,7 +290,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         crud.log_message(db, user_id, "inbound", "callback", data)
 
     if data == "menu:book":
-        _get_fsm(user_id, reset=True)
+        _get_fsm(user_id, reset=True).begin_booking()  # FIX (2026-07-14): see _menu_response
         reply, keyboard = "📅 جيد! ما اسمك الكريم؟", None
     elif data == "menu:inquiry":
         with get_db() as db:

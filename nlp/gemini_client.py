@@ -71,14 +71,40 @@ class GeminiClient:
             return ""
 
         field_prompts = {
-            "name":      "ما اسم المريض في هذه الجملة؟ أجب بالاسم فقط.",
-            "complaint": "ما هي الشكوى الطبية في هذه الجملة؟ أجب بجملة قصيرة.",
-            "urgency":   "هل الحالة عاجلة أم متوسطة أم روتينية؟ أجب بكلمة واحدة.",
-            "time_pref": "متى يريد المريض الموعد؟ أجب بكلمة أو عبارة قصيرة.",
+            "name":      "استخرج اسم المريض فقط. أجب بالاسم وحده بدون أي كلمة إضافية. إذا لا يوجد اسم أجب: لا يوجد",
+            "complaint": "استخرج العرَض أو الشكوى الطبية فقط كما ذكرها المريض، بحد أقصى 8 كلمات، بدون مقدمة أو نصيحة أو سؤال. إذا لا توجد شكوى أجب: لا يوجد",
+            "urgency":   "هل الحالة عاجلة أم متوسطة أم روتينية؟ أجب بكلمة واحدة فقط.",
+            "time_pref": "متى يريد المريض الموعد؟ أجب بكلمة أو عبارة قصيرة فقط.",
         }
-        instruction = field_prompts.get(missing_field, "استخرج المعلومة المطلوبة.")
+        instruction = field_prompts.get(missing_field, "استخرج المعلومة المطلوبة فقط بدون أي إضافة.")
         prompt = f"الرسالة: '{text}'\n{instruction}"
-        return await self.ask(prompt, max_tokens=50)
+        raw = await self.ask(prompt, max_tokens=30)
+        return self._clean_extraction(raw)
+
+    @staticmethod
+    def _clean_extraction(raw: str) -> str:
+        """
+        FIX (2026-07-14): validate extraction output before it is stored.
+        Team testing showed chatty replies (e.g. "سلامتك، هاد الموضوع بيحتاج فحص
+        سريري...") being saved as the patient's complaint and appearing in the
+        dashboard's الشكوى column. Reject anything that looks like a chat reply
+        instead of an extracted field value.
+        """
+        if not raw:
+            return ""
+        value = raw.strip().strip('"\'`').splitlines()[0].strip()
+        if not value or "لا يوجد" in value:
+            return ""
+        if len(value) > 60 or "؟" in value or "?" in value:
+            return ""
+        chatty_markers = [
+            "سلامتك", "اهلا", "أهلا", "أهلاً", "مرحبا", "مرحباً", "بقدر", "يمكنني",
+            "انا هنا", "أنا هنا", "احجزلك", "أحجزلك", "تفضل", "بالتاكيد", "بالتأكيد",
+            "عذرا", "عذراً", "للمساعده", "للمساعدة",
+        ]
+        if any(marker in value for marker in chatty_markers):
+            return ""
+        return value
 
     async def generate_voice_response(self, text: str) -> str:
         """

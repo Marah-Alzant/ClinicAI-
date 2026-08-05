@@ -6,6 +6,8 @@ Patient appointment booking FSM:
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
@@ -15,7 +17,7 @@ from nlp.normalizer import normalize
 from scheduler.priority import score_and_classify
 from scheduler.classifier import classify_specialty, SPECIALTY_NAMES_AR
 from nlp.gemini_client import gemini
-from bot.keyboards import urgency_keyboard, time_pref_keyboard, confirm_keyboard, specialty_keyboard
+from bot.keyboards import urgency_keyboard, time_pref_keyboard, confirm_keyboard, specialty_keyboard, main_menu_keyboard
 
 
 class State(Enum):
@@ -64,7 +66,26 @@ SPECIALTY_LABEL_TO_KEY = {
     "جلديه": "dermatology",
     "طب عام": "general_practice",
     "عام": "general_practice",
+    # FIX (2026-07-14): recognize specialties patients ask for even when the
+    # clinic doesn't offer them, so the bot can say so instead of looping.
+    "صدريه": "pulmonology",
+    "رئه": "pulmonology",
+    "تنفس": "pulmonology",
+    "باطنيه": "gastroenterology",
+    "باطني": "gastroenterology",
+    "معده": "gastroenterology",
+    "هضمي": "gastroenterology",
+    "انف": "ent",
+    "اذن": "ent",
+    "حنجره": "ent",
+    "نفسيه": "psychiatry",
+    "نفسي": "psychiatry",
+    "غدد": "endocrinology",
+    "سكري": "endocrinology",
+    "عيون": "ophthalmology",
 }
+
+MODIFY_WORDS = ["عدل", "بدل", "غير الموعد", "غيرلي", "غيري الموعد", "وقت ثاني", "وقت تاني", "موعد ثاني", "موعد تاني", "مش مناسب", "ما بناسبني"]
 
 
 @dataclass
@@ -95,6 +116,14 @@ class PatientFSM:
             return await self._reply_with_context(text)
 
         if self.state == State.GREETING:
+            # FIX (2026-07-14): if the first message already contains the name
+            # (e.g. "اسمي حنان النخال"), don't ask for it again.
+            if self.data.get("name"):
+                self.state = State.COLLECT_COMPLAINT
+                return self._reply(
+                    f"أهلاً وسهلاً {self.data['name']} 👋\n" + FIELD_QUESTIONS_AR["complaint"],
+                    None,
+                )
             self.state = State.COLLECT_NAME
             return self._reply(
                 "أهلاً وسهلاً 👋 أنا المساعد الذكي للحجز في العيادة.\n" + FIELD_QUESTIONS_AR["name"],
@@ -148,13 +177,48 @@ class PatientFSM:
             return await self._run_validate()
 
         if self.state == State.COLLECT_SPECIALTY:
+            # FIX (2026-07-14): pending offer to book with the GP after we told
+            # the patient their requested clinic isn't available.
+            if self.data.get("pending_gp_offer"):
+                if any(w in norm for w in CONFIRM_WORDS) or "عام" in norm:
+                    self.data.pop("pending_gp_offer", None)
+                    self.data["specialty_hint"] = "general_practice"
+                    self.data["specialty_ar"] = SPECIALTY_NAMES_AR["general_practice"]
+                    self.data["specialty_confirmed_by_patient"] = True
+                    return await self._score_and_find_slot()
+                if any(w in norm for w in CANCEL_WORDS):
+                    self.data.pop("pending_gp_offer", None)
+                    self.state = State.CANCELLED
+                    return self._reply("ولا يهمك، تم الإلغاء. نتمنى لك يوماً سعيداً وشفاءً عاجلاً 🌿", main_menu_keyboard())
+                return self._reply("بس أتأكد: أحجزلك عند طبيب العام؟ اكتب نعم أو لا.", None)
+
             specialty_key = self._parse_specialty_label(text)
-            if not specialty_key:
-                return self._reply("اختاري/اختر التخصص الأقرب من الأزرار حتى أحجز الموعد في العيادة المناسبة.", specialty_keyboard())
-            self.data["specialty_hint"] = specialty_key
-            self.data["specialty_ar"] = SPECIALTY_NAMES_AR.get(specialty_key, specialty_key)
-            self.data["specialty_confirmed_by_patient"] = True
-            return await self._score_and_find_slot()
+            if specialty_key:
+                # FIX (2026-07-14): tell the patient when the clinic doesn't
+                # exist here (e.g. صدرية) and offer the GP, instead of looping.
+                if not self._specialty_available(specialty_key):
+                    self.data["pending_gp_offer"] = True
+                    name_ar = SPECIALTY_NAMES_AR.get(specialty_key, specialty_key)
+                    return self._reply(
+                        f"عذراً، عيادة {name_ar} غير متوفرة عندنا حالياً 🙏\n"
+                        "بقدر أحجزلك عند طبيب العام ليقيّم حالتك ويحوّلك إذا لزم. يناسبك؟ (نعم/لا)",
+                        None,
+                    )
+                self.data["specialty_hint"] = specialty_key
+                self.data["specialty_ar"] = SPECIALTY_NAMES_AR.get(specialty_key, specialty_key)
+                self.data["specialty_confirmed_by_patient"] = True
+                return await self._score_and_find_slot()
+
+            attempts = self.data.get("specialty_attempts", 0) + 1
+            self.data["specialty_attempts"] = attempts
+            if attempts >= 2:
+                self.data["pending_gp_offer"] = True
+                return self._reply(
+                    "يبدو أن التخصص المطلوب غير متوفر ضمن عياداتنا الحالية 🙏\n"
+                    "بقدر أحجزلك عند طبيب العام ليقيّم حالتك ويحوّلك إذا لزم. يناسبك؟ (نعم/لا)",
+                    None,
+                )
+            return self._reply("اختاري/اختر التخصص الأقرب من الأزرار حتى أحجز الموعد في العيادة المناسبة.", specialty_keyboard())
 
         if self.state == State.CONFIRM:
             return await self._handle_confirm(norm)
@@ -290,16 +354,7 @@ class PatientFSM:
                 telegram_id=self.user_id,
             )
             if slot:
-                self.slot = {
-                    "slot_id": slot.slot_id,
-                    "slot_datetime": slot.slot_datetime,
-                    "specialty": slot.doctor.specialty if slot.doctor else slot.specialty,
-                    "priority_class": slot.priority_class,
-                    "doctor_id": slot.doctor.doctor_id if slot.doctor else None,
-                    "doctor_name": slot.doctor.name if slot.doctor else None,
-                    "clinic_code": slot.doctor.clinic_code if slot.doctor else None,
-                    "clinic_name": slot.doctor.clinic_name if slot.doctor else None,
-                }
+                self.slot = self._slot_to_dict(slot)
 
         if not self.slot:
             await self._save_waitlist()
@@ -307,32 +362,59 @@ class PatientFSM:
             return (
                 "عفواً، ما في مواعيد متاحة حالياً في هذا الاختصاص. 😔\n"
                 "تم حفظ ملفك وإضافتك لقائمة الانتظار، وسنتواصل معك بأقرب وقت.",
-                None,
+                main_menu_keyboard(),
             )
 
         self.state = State.CONFIRM
+        return (self._offer_message("وجدت موعد مناسب! 📅"), confirm_keyboard())
+
+    def _slot_to_dict(self, slot) -> dict:
+        return {
+            "slot_id": slot.slot_id,
+            "slot_datetime": slot.slot_datetime,
+            "specialty": slot.doctor.specialty if slot.doctor else slot.specialty,
+            "priority_class": slot.priority_class,
+            "doctor_id": slot.doctor.doctor_id if slot.doctor else None,
+            "doctor_name": slot.doctor.name if slot.doctor else None,
+            "clinic_code": slot.doctor.clinic_code if slot.doctor else None,
+            "clinic_name": slot.doctor.clinic_name if slot.doctor else None,
+        }
+
+    def _offer_message(self, header: str) -> str:
+        # FIX (2026-07-14): the priority score is internal triage data for the
+        # clinic dashboard — it is no longer shown to the patient.
         dt = self.slot["slot_datetime"].strftime("%A، %d/%m/%Y — %H:%M")
         return (
-            f"وجدت موعد مناسب! 📅\n\n"
+            f"{header}\n\n"
             f"📆 {dt}\n"
             f"🏥 التخصص: {self.data.get('specialty_ar', '')}\n"
             f"👨‍⚕️ الطبيب: {self.slot.get('doctor_name') or '—'}\n"
-            f"🏢 العيادة: {self.slot.get('clinic_name') or '—'} ({self.slot.get('clinic_code') or '—'})\n"
-            f"{self.priority.label_ar} — درجة الأولوية: {self.priority.score:.2f}\n\n"
-            f"تأكد الحجز؟",
-            confirm_keyboard(),
+            f"🏢 العيادة: {self.slot.get('clinic_name') or '—'} ({self.slot.get('clinic_code') or '—'})\n\n"
+            f"تأكد الحجز؟"
         )
 
     async def _handle_confirm(self, norm: str) -> tuple[str, object | None]:
+        # FIX (2026-07-14): let the patient adjust the offered time BEFORE
+        # confirming (e.g. "بدي الساعة 10 ونص" or "عدل الموعد") instead of
+        # forcing نعم/لا only. Checked before confirm/cancel so that
+        # "لا، بدي وقت تاني" modifies rather than cancels.
+        requested_time = self._parse_requested_time(norm)
+        if requested_time or any(w in norm for w in MODIFY_WORDS):
+            return await self._offer_alternative_slot(requested_time)
+
         if any(w in norm for w in CONFIRM_WORDS):
             result = await self._finalize()
             if result.get("slot_conflict"):
+                # FIX (2026-07-14): search for the replacement immediately —
+                # previously the FSM parked in FIND_SLOT with no handler for
+                # the patient's next message.
+                rejected = self.data.setdefault("rejected_slot_ids", [])
+                if self.slot and self.slot.get("slot_id") not in rejected:
+                    rejected.append(self.slot["slot_id"])
                 self.slot = None
                 self.state = State.FIND_SLOT
-                return (
-                    "للأسف الموعد انحجز قبل التأكيد بثواني. رح أبحث لك عن أقرب موعد بديل الآن.",
-                    None,
-                )
+                reply, keyboard = await self._find_slot()
+                return ("للأسف الموعد انحجز قبل التأكيد بثواني. 🙏\n" + reply, keyboard)
 
             if result.get("booking_conflict"):
                 conflict = result["booking_conflict"]
@@ -350,20 +432,20 @@ class PatientFSM:
                         "ما بقدر أثبت هذا الموعد لأن عندك موعد آخر بنفس الوقت أو وقت متداخل. ⏰\n"
                         f"موعدك الحالي: {when} — {specialty}.\n"
                         "ممكن تحجز موعدًا بتخصص مختلف في نفس اليوم بشرط يكون بوقت آخر غير متداخل.",
-                        None,
+                        main_menu_keyboard(),
                     )
                 return (
                     "عندك موعد فعال مسبقًا لنفس التخصص في نفس اليوم، لذلك ما حجزت موعدًا ثانيًا. ✅\n"
                     f"موعدك الحالي: {when} — {specialty}.\n"
                     "لو بدك تشوف تخصصًا مختلفًا، ممكن تحجز موعدًا آخر بوقت غير متداخل.",
-                    None,
+                    main_menu_keyboard(),
                 )
 
             if not result.get("appointment"):
                 self.state = State.WAITLISTED
                 return (
                     "تم حفظ ملفك، لكن لم أستطع تثبيت الموعد حالياً. أضفتك لقائمة الانتظار وسنتواصل معك. 🌿",
-                    None,
+                    main_menu_keyboard(),
                 )
 
             appt = result["appointment"]
@@ -376,12 +458,12 @@ class PatientFSM:
                 f"👨‍⚕️ الطبيب: {self.slot.get('doctor_name') or '—'}\n"
                 f"🏢 العيادة: {self.slot.get('clinic_name') or '—'}\n"
                 "سيظهر الموعد تلقائياً في لوحة التحكم كموعد محجوز. نتمنى لك الشفاء 🌿",
-                None,
+                main_menu_keyboard(),  # FIX (2026-07-14): replace lingering confirm buttons
             )
 
         if any(w in norm for w in CANCEL_WORDS):
             self.state = State.CANCELLED
-            return ("تم الإلغاء. إذا احتجت أي شيء، أنا هون. 👋", None)
+            return ("تم الإلغاء. إذا احتجت أي شيء، أنا هون. 👋", main_menu_keyboard())
 
         return ("اكتب نعم لتأكيد الحجز، أو لا للإلغاء.", confirm_keyboard())
 
@@ -538,6 +620,88 @@ class PatientFSM:
             "أنت فهمت", "انت فهمت", "فهمت", "ماذا فهمت", "إيه اللي فهمته", "ايش فهمت",
             "أشرح", "اشرح", "قلت", "قلتلك", "what did you understand", "what do you know",
         ])
+
+    _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+    _HOUR_WORDS = {
+        "وحده": 1, "واحده": 1, "ثنتين": 2, "تنتين": 2, "ثلاثه": 3, "اربعه": 4,
+        "خمسه": 5, "سته": 6, "سبعه": 7, "ثمانيه": 8, "تمانيه": 8, "تسعه": 9,
+        "عشره": 10, "احدعش": 11, "حدعش": 11, "اثنعش": 12, "اطنعش": 12,
+    }
+
+    def _parse_requested_time(self, norm: str) -> dict | None:
+        """FIX (2026-07-14): understand a requested clock time like
+        'بدي الساعة 10 ونص' at the confirmation step."""
+        t = (norm or "").translate(self._ARABIC_DIGITS)
+        hour = None
+        m = re.search(r"(?<!\d)(\d{1,2})(?!\d)", t)
+        if m:
+            hour = int(m.group(1))
+        else:
+            for word, h in self._HOUR_WORDS.items():
+                if word in t:
+                    hour = h
+                    break
+        if hour is None or not (0 <= hour <= 23):
+            return None
+        minute = 30 if ("ونص" in t or "و نص" in t) else 15 if ("وربع" in t or "و ربع" in t) else 0
+        if hour <= 7:  # clinic context: "4" means 16:00, not 04:00
+            hour += 12
+        return {"hour": hour, "minute": minute}
+
+    async def _offer_alternative_slot(self, requested_time: dict | None) -> tuple[str, object | None]:
+        from database.db import get_db
+        from database import crud
+
+        rejected = self.data.setdefault("rejected_slot_ids", [])
+        if self.slot and self.slot.get("slot_id") not in rejected:
+            rejected.append(self.slot["slot_id"])
+
+        new_slot = None
+        with get_db() as db:
+            slot = crud.find_alternative_slot(
+                db,
+                specialty=self.data.get("specialty_hint", "general_practice"),
+                priority_class=self.priority.priority_class if self.priority else "P3",
+                preferred_date=(self.data.get("time_pref") or {}).get("date"),
+                preferred_hour=requested_time.get("hour") if requested_time else None,
+                preferred_minute=requested_time.get("minute", 0) if requested_time else 0,
+                exclude_slot_ids=rejected,
+                telegram_id=self.user_id,
+            )
+            if slot:
+                new_slot = self._slot_to_dict(slot)
+
+        self.state = State.CONFIRM
+        if not new_slot:
+            # Put the original offer back on the table.
+            if self.slot and self.slot.get("slot_id") in rejected:
+                rejected.remove(self.slot["slot_id"])
+            return (
+                "ما لقيت موعد تاني أقرب للوقت اللي طلبته حالياً 🙏 الموعد المعروض هو الأنسب المتاح.\n"
+                + self._offer_message("تذكير بالموعد المعروض:"),
+                confirm_keyboard(),
+            )
+
+        self.slot = new_slot
+        return (self._offer_message("تمام، عدّلت لك الموعد! 📅"), confirm_keyboard())
+
+    def _specialty_available(self, specialty_key: str) -> bool:
+        from database.db import get_db
+        from database import crud
+
+        try:
+            with get_db() as db:
+                return specialty_key in crud.get_available_specialties(db)
+        except Exception:
+            return True  # never block booking because of an availability lookup error
+
+    def begin_booking(self) -> None:
+        """FIX (2026-07-14): start a fresh booking directly at name collection.
+        Used by the menu button — previously the handler asked for the name but
+        left the FSM in GREETING, so the patient's name triggered a second
+        greeting and they had to send their name twice."""
+        self._reset()
+        self.state = State.COLLECT_NAME
 
     def _is_new_booking_request(self, text: str) -> bool:
         lowered = (text or "").lower().strip()

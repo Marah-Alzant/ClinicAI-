@@ -7,6 +7,8 @@ Uses a layered approach: keyword rules first, Gemini fallback for ambiguous case
 import re
 from typing import Optional
 
+from nlp.normalizer import normalize as _normalize_pattern
+
 
 # ── Specialty routing rules ────────────────────────────────────────────────────
 # Each entry: pattern (regex on normalized Arabic) → specialty key
@@ -40,6 +42,12 @@ ROUTING_RULES: list[tuple[str, str]] = [
     # General fallback
     (r"حمى|زكام|كحة|إرهاق|وهن|فحص عام|كشف روتيني", "general_practice"),
 ]
+
+# FIX (2026-07-14): normalize the patterns with the same pipeline applied to
+# patient input. Without this, any rule containing hamza (أ/إ/آ) or final
+# ta-marbuta could never match the normalized text (e.g. "ألم صدر" vs "الم صدر"),
+# silently breaking automatic classification for common complaints.
+ROUTING_RULES = [(_normalize_pattern(pattern), specialty) for pattern, specialty in ROUTING_RULES]
 
 # ── Human-readable Arabic specialty names ─────────────────────────────────────
 SPECIALTY_NAMES_AR = {

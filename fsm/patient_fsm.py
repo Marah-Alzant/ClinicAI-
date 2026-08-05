@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import Enum, auto
 from typing import Optional
 
@@ -256,30 +257,43 @@ class PatientFSM:
     # ── Extraction / validation ───────────────────────────────────────────────
 
     async def _absorb(self, text: str):
-        """Merge newly extracted fields and optionally enrich with AI."""
+        """Merge local extraction while preserving the patient's exact complaint."""
         extracted = extract_patient_fields(text)
-        for k, v in extracted.items():
-            if v is not None and not self.data.get(k):
-                self.data[k] = v
+        for key, value in extracted.items():
+            if value is None or self.data.get(key):
+                continue
+            if (
+                key == "complaint"
+                and isinstance(value, dict)
+                and self.state == State.COLLECT_COMPLAINT
+            ):
+                value = {**value, "raw": text.strip()}
+            self.data[key] = value
 
-        if text.strip() and len(text.strip()) > 20 and any(self.data.get(f) is None for f in REQUIRED_FIELDS):
+        # AI is optional enrichment only. The resilient client never raises.
+        if (
+            text.strip()
+            and len(text.strip()) > 20
+            and any(self.data.get(field) is None for field in REQUIRED_FIELDS)
+        ):
             await self._try_ai_extraction(text)
 
     async def _extract_complaint_from_text(self, original_text: str) -> dict | None:
-        complaint = extract_patient_fields(original_text).get("complaint")
-        if complaint:
-            return complaint
+        """Always keep the patient's words; an LLM may never rewrite the complaint."""
+        original_text = (original_text or "").strip()
+        if not original_text:
+            return None
 
-        if gemini._available:
-            complaint_text = await gemini.extract_missing_field(original_text, "complaint")
-            if complaint_text:
-                return {
-                    "raw": complaint_text.strip(),
-                    "category": "general",
-                    "urgency_score": 0.3,
-                    "specialty": "general_practice",
-                }
-        return None
+        complaint = extract_patient_fields(original_text).get("complaint")
+        if isinstance(complaint, dict):
+            return {**complaint, "raw": original_text}
+
+        return {
+            "raw": original_text,
+            "category": "general",
+            "urgency_score": 0.3,
+            "specialty": "general_practice",
+        }
 
     def _missing_fields(self) -> list[str]:
         missing = []
@@ -345,28 +359,92 @@ class PatientFSM:
         from database.db import get_db
         from database import crud
 
+        preferred_date = (self.data.get("time_pref") or {}).get("date")
+        offer: dict = {}
+
         with get_db() as db:
-            slot = crud.find_next_available_slot(
+            specialty = self.data.get("specialty_hint", "general_practice")
+            doctor = crud.get_active_doctor_for_specialty(db, specialty)
+
+            if doctor is None:
+                self.data["pending_gp_offer"] = True
+                self.state = State.COLLECT_SPECIALTY
+                name_ar = self.data.get("specialty_ar") or specialty
+                return self._reply(
+                    f"عذراً، عيادة {name_ar} غير متوفرة عندنا حالياً 🙏\n"
+                    "بقدر أحجزلك عند طبيب العام ليقيّم حالتك ويحوّلك إذا لزم. يناسبك؟ (نعم/لا)",
+                    None,
+                )
+
+            self.data["doctor_id"] = doctor.doctor_id
+            self.data["doctor_name"] = doctor.name
+            self.data["clinic_code"] = doctor.clinic_code
+            self.data["clinic_name"] = doctor.clinic_name
+
+            offer = crud.find_slot_offer(
                 db,
-                specialty=self.data.get("specialty_hint", "general_practice"),
+                specialty=specialty,
                 priority_class=self.priority.priority_class,
-                preferred_date=self.data.get("time_pref", {}).get("date"),
+                preferred_date=preferred_date,
                 telegram_id=self.user_id,
+                doctor_id=doctor.doctor_id,
             )
-            if slot:
-                self.slot = self._slot_to_dict(slot)
+            slot = offer.get("slot")
+            self.slot = self._slot_to_dict(slot) if slot else None
 
         if not self.slot:
             await self._save_waitlist()
             self.state = State.WAITLISTED
+            requested_label = self._requested_date_label(offer.get("requested_date"))
+            when_text = (
+                f" {requested_label} أو بعده"
+                if offer.get("requested_date")
+                else " حالياً"
+            )
             return (
-                "عفواً، ما في مواعيد متاحة حالياً في هذا الاختصاص. 😔\n"
+                f"عفواً، ما في مواعيد متاحة{when_text} في هذا الاختصاص. 😔\n"
                 "تم حفظ ملفك وإضافتك لقائمة الانتظار، وسنتواصل معك بأقرب وقت.",
                 main_menu_keyboard(),
             )
 
+        self.slot.update(
+            {
+                "requested_date": offer.get("requested_date"),
+                "matched_requested_date": bool(offer.get("matched_requested_date")),
+                "is_alternative": bool(offer.get("is_alternative")),
+                "offer_reason": offer.get("reason"),
+            }
+        )
+
         self.state = State.CONFIRM
+        if self.slot.get("is_alternative"):
+            requested_label = self._requested_date_label(self.slot.get("requested_date"))
+            header = (
+                f"ما لقيت موعداً متاحاً {requested_label} في "
+                f"{self.slot.get('clinic_name') or 'هذه العيادة'}.\n"
+                "أقرب موعد بديل متاح هو: 📅"
+            )
+            return (self._offer_message(header, alternative=True), confirm_keyboard())
+
+        if self.slot.get("matched_requested_date"):
+            return (
+                self._offer_message("وجدت موعداً مناسباً في التاريخ الذي طلبته! 📅"),
+                confirm_keyboard(),
+            )
+
         return (self._offer_message("وجدت موعد مناسب! 📅"), confirm_keyboard())
+
+    @staticmethod
+    def _requested_date_label(requested_iso: str | None) -> str:
+        if not requested_iso:
+            return "في التاريخ المطلوب"
+        try:
+            requested_day = date.fromisoformat(str(requested_iso)[:10])
+        except ValueError:
+            return "في التاريخ المطلوب"
+        if requested_day == date.today():
+            return "اليوم"
+        return f"بتاريخ {requested_day.strftime('%d/%m/%Y')}"
 
     def _slot_to_dict(self, slot) -> dict:
         return {
@@ -380,7 +458,7 @@ class PatientFSM:
             "clinic_name": slot.doctor.clinic_name if slot.doctor else None,
         }
 
-    def _offer_message(self, header: str) -> str:
+    def _offer_message(self, header: str, alternative: bool = False) -> str:
         # FIX (2026-07-14): the priority score is internal triage data for the
         # clinic dashboard — it is no longer shown to the patient.
         dt = self.slot["slot_datetime"].strftime("%A، %d/%m/%Y — %H:%M")
@@ -390,7 +468,7 @@ class PatientFSM:
             f"🏥 التخصص: {self.data.get('specialty_ar', '')}\n"
             f"👨‍⚕️ الطبيب: {self.slot.get('doctor_name') or '—'}\n"
             f"🏢 العيادة: {self.slot.get('clinic_name') or '—'} ({self.slot.get('clinic_code') or '—'})\n\n"
-            f"تأكد الحجز؟"
+            f"{'هل يناسبك الموعد البديل وتريد تأكيد الحجز؟' if alternative else 'تأكد الحجز؟'}"
         )
 
     async def _handle_confirm(self, norm: str) -> tuple[str, object | None]:
@@ -563,24 +641,16 @@ class PatientFSM:
         return None
 
     async def _try_ai_extraction(self, text: str):
+        """Optional LLM enrichment; local booking logic remains authoritative."""
         if not gemini._available:
             return
 
-        if not self.data.get("name"):
+        if self.state == State.COLLECT_NAME and not self.data.get("name"):
             name = await gemini.extract_missing_field(text, "name")
             if name:
                 self.data["name"] = name.strip()
 
-        if not self.data.get("complaint"):
-            complaint = await gemini.extract_missing_field(text, "complaint")
-            if complaint:
-                self.data["complaint"] = {
-                    "raw": complaint.strip(),
-                    "category": "general",
-                    "urgency_score": 0.3,
-                    "specialty": "general_practice",
-                }
-
+        # Complaint is deliberately excluded: preserve the patient's exact text.
         if not self.data.get("urgency_score"):
             urgency = await gemini.extract_missing_field(text, "urgency")
             score = self._score_from_label(urgency)
@@ -667,6 +737,7 @@ class PatientFSM:
                 preferred_minute=requested_time.get("minute", 0) if requested_time else 0,
                 exclude_slot_ids=rejected,
                 telegram_id=self.user_id,
+                doctor_id=self.data.get("doctor_id"),
             )
             if slot:
                 new_slot = self._slot_to_dict(slot)

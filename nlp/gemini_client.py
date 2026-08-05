@@ -1,11 +1,28 @@
 """
-nlp/gemini_client.py — Wrapper around Gemini API.
+nlp/gemini_client.py — resilient LLM router.
 
-All Gemini calls go through this single client so the key,
-model, and retry logic live in one place.
+Provider order:
+1. Gemini when configured.
+2. OpenAI API when configured.
+3. Empty-string fallback so the deterministic FSM/rules continue normally.
+
+No provider exception is allowed to stop the booking flow.
 """
+from __future__ import annotations
+
 import asyncio
-from config import GEMINI_API_KEY, GEMINI_MODEL, CLINIC_NAME
+import logging
+
+from config import (
+    CLINIC_NAME,
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    LLM_TIMEOUT_SECONDS,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+)
+
+logger = logging.getLogger(__name__)
 
 try:
     import google.genai as genai
@@ -14,14 +31,20 @@ except ImportError:  # pragma: no cover
     genai = None
     google_types = None
 
-GEMINI_AVAILABLE = bool(GEMINI_API_KEY and genai is not None)
-if GEMINI_AVAILABLE:
-    client = genai.Client(api_key=GEMINI_API_KEY)
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover
+    OpenAI = None
 
-# System context injected into every conversation
+GEMINI_AVAILABLE = bool(GEMINI_API_KEY and genai is not None)
+OPENAI_AVAILABLE = bool(OPENAI_API_KEY and OpenAI is not None)
+
+_gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_AVAILABLE else None
+_openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_AVAILABLE else None
+
 SYSTEM_CONTEXT = f"""
 أنت مساعد إداري ذكي لـ {CLINIC_NAME}.
-مهمتك الوحيدة هي مساعدة المرضى في حجز المواعيدات وتقديم معلومات إدارية.
+مهمتك الوحيدة هي مساعدة المرضى في حجز المواعيد وتقديم معلومات إدارية.
 لا تقدم تشخيصات طبية أو نصائح علاجية بأي شكل.
 تحدث دائماً باللهجة الفلسطينية العامية بشكل ودود وواضح.
 إجاباتك قصيرة ومباشرة ولا تتجاوز ثلاثة أسطر إلا إذا طُلب منك أكثر.
@@ -29,35 +52,78 @@ SYSTEM_CONTEXT = f"""
 
 
 class GeminiClient:
+    """Backward-compatible name used by the rest of the project."""
+
     def __init__(self):
-        self._available = GEMINI_AVAILABLE
-        self._model = None
-        if self._available:
-            self._model = GEMINI_MODEL
+        self._gemini_available = GEMINI_AVAILABLE
+        self._openai_available = OPENAI_AVAILABLE
+        self._available = self._gemini_available or self._openai_available
+        self._model = GEMINI_MODEL if self._gemini_available else None
+        self._openai_model = OPENAI_MODEL if self._openai_available else None
+        self._timeout = max(int(LLM_TIMEOUT_SECONDS or 20), 1)
 
-    async def ask(self, prompt: str, max_tokens: int = 300) -> str:
-        """Single-turn question → answer."""
-        if not self._available:
-            raise RuntimeError("Gemini API key is not configured or google-generativeai is unavailable.")
-
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=self._model,
-            contents=prompt,
-            config=google_types.GenerateContentConfig(
-                system_instruction=SYSTEM_CONTEXT,
-                max_output_tokens=max_tokens,
-            ),
-        )
-        return response.text.strip()
-
-    async def build_response(self, fsm_state: str, data: dict) -> str:
-        """
-        Generate a context-aware Arabic response for a given FSM state.
-        """
-        if not self._available:
+    async def _ask_gemini(self, prompt: str, max_tokens: int) -> str:
+        if not self._gemini_available or _gemini_client is None:
             return ""
 
+        def _request():
+            return _gemini_client.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=google_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_CONTEXT,
+                    max_output_tokens=max_tokens,
+                ),
+            )
+
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(_request),
+                timeout=self._timeout,
+            )
+            return (getattr(response, "text", "") or "").strip()
+        except Exception as exc:  # network/model/key/timeout: continue to fallback
+            logger.warning("Gemini request failed; trying fallback: %s", exc)
+            return ""
+
+    async def _ask_openai(self, prompt: str, max_tokens: int) -> str:
+        if not self._openai_available or _openai_client is None:
+            return ""
+
+        def _request():
+            return _openai_client.responses.create(
+                model=self._openai_model,
+                instructions=SYSTEM_CONTEXT,
+                input=prompt,
+                max_output_tokens=max_tokens,
+            )
+
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(_request),
+                timeout=self._timeout,
+            )
+            return (getattr(response, "output_text", "") or "").strip()
+        except Exception as exc:
+            logger.warning("OpenAI fallback request failed; using local FSM: %s", exc)
+            return ""
+
+    async def ask(self, prompt: str, max_tokens: int = 300) -> str:
+        """Never raises: Gemini -> optional OpenAI -> local empty fallback."""
+        if not prompt:
+            return ""
+
+        response = await self._ask_gemini(prompt, max_tokens)
+        if response:
+            return response
+
+        response = await self._ask_openai(prompt, max_tokens)
+        if response:
+            return response
+
+        return ""
+
+    async def build_response(self, fsm_state: str, data: dict) -> str:
         prompt = (
             f"حالة المحادثة: {fsm_state}\n"
             f"بيانات المحادثة الحالية: {data}\n"
@@ -66,30 +132,24 @@ class GeminiClient:
         return await self.ask(prompt)
 
     async def extract_missing_field(self, text: str, missing_field: str) -> str:
-        """Ask Gemini to extract a specific field from a free-form message."""
-        if not self._available:
-            return ""
-
         field_prompts = {
-            "name":      "استخرج اسم المريض فقط. أجب بالاسم وحده بدون أي كلمة إضافية. إذا لا يوجد اسم أجب: لا يوجد",
-            "complaint": "استخرج العرَض أو الشكوى الطبية فقط كما ذكرها المريض، بحد أقصى 8 كلمات، بدون مقدمة أو نصيحة أو سؤال. إذا لا توجد شكوى أجب: لا يوجد",
-            "urgency":   "هل الحالة عاجلة أم متوسطة أم روتينية؟ أجب بكلمة واحدة فقط.",
+            "name": "استخرج اسم المريض فقط. أجب بالاسم وحده بدون أي كلمة إضافية. إذا لا يوجد اسم أجب: لا يوجد",
+            "complaint": "استخرج العرَض أو الشكوى فقط كما قالها المريض، بحد أقصى 8 كلمات، بلا مقدمة أو سؤال. إذا لا توجد شكوى أجب: لا يوجد",
+            "urgency": "هل الحالة عاجلة أم متوسطة أم روتينية؟ أجب بكلمة واحدة فقط.",
             "time_pref": "متى يريد المريض الموعد؟ أجب بكلمة أو عبارة قصيرة فقط.",
         }
-        instruction = field_prompts.get(missing_field, "استخرج المعلومة المطلوبة فقط بدون أي إضافة.")
-        prompt = f"الرسالة: '{text}'\n{instruction}"
-        raw = await self.ask(prompt, max_tokens=30)
+        instruction = field_prompts.get(
+            missing_field,
+            "استخرج المعلومة المطلوبة فقط بدون أي إضافة.",
+        )
+        raw = await self.ask(
+            f"الرسالة: '{text}'\n{instruction}",
+            max_tokens=30,
+        )
         return self._clean_extraction(raw)
 
     @staticmethod
     def _clean_extraction(raw: str) -> str:
-        """
-        FIX (2026-07-14): validate extraction output before it is stored.
-        Team testing showed chatty replies (e.g. "سلامتك، هاد الموضوع بيحتاج فحص
-        سريري...") being saved as the patient's complaint and appearing in the
-        dashboard's الشكوى column. Reject anything that looks like a chat reply
-        instead of an extracted field value.
-        """
         if not raw:
             return ""
         value = raw.strip().strip('"\'`').splitlines()[0].strip()
@@ -98,28 +158,28 @@ class GeminiClient:
         if len(value) > 60 or "؟" in value or "?" in value:
             return ""
         chatty_markers = [
-            "سلامتك", "اهلا", "أهلا", "أهلاً", "مرحبا", "مرحباً", "بقدر", "يمكنني",
-            "انا هنا", "أنا هنا", "احجزلك", "أحجزلك", "تفضل", "بالتاكيد", "بالتأكيد",
-            "عذرا", "عذراً", "للمساعده", "للمساعدة",
+            "سلامتك", "اهلا", "أهلا", "أهلاً", "مرحبا", "مرحباً", "بقدر",
+            "يمكنني", "انا هنا", "أنا هنا", "احجزلك", "أحجزلك", "تفضل",
+            "بالتاكيد", "بالتأكيد", "عذرا", "عذراً", "للمساعده", "للمساعدة",
         ]
         if any(marker in value for marker in chatty_markers):
             return ""
         return value
 
     async def generate_voice_response(self, text: str) -> str:
-        """
-        Convert a structured bot reply into natural spoken Arabic
-        suitable for TTS (no markdown, no bullet points).
-        """
-        if not self._available:
-            return text
-
         prompt = (
-            f"حوّل هذا النص إلى جملة عربية طبيعية تصلح للتحويل إلى صوت "
-            f"(بدون رموز أو نقاط أو أرقام):\n{text}"
+            "حوّل النص التالي إلى جملة عربية طبيعية تصلح للصوت، "
+            f"بدون رموز أو قوائم:\n{text}"
         )
-        return await self.ask(prompt, max_tokens=150)
+        response = await self.ask(prompt, max_tokens=150)
+        return response or text
+
+    def provider_status(self) -> dict[str, bool]:
+        return {
+            "gemini": self._gemini_available,
+            "openai": self._openai_available,
+            "local_fallback": True,
+        }
 
 
-# Singleton — import this everywhere
 gemini = GeminiClient()

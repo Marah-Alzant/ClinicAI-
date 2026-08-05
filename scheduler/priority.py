@@ -6,6 +6,7 @@ then maps that score to a priority class (P1 / P2 / P3).
 All weights are expert-defined and sum to 1.0.
 """
 from dataclasses import dataclass
+import re
 from nlp.normalizer import normalize
 
 # ── Weight table (must sum to 1.0) ────────────────────────────────────────────
@@ -47,6 +48,58 @@ TIMING_SCORES = {
     14: 0.25,  # next week
     30: 0.1,   # this month
 }
+
+
+RED_FLAG_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("وجع صدر", "chest_pain"),
+    ("الم صدر", "chest_pain"),
+    ("ضغط على الصدر", "chest_pressure"),
+    ("ضيق نفس", "breathing_difficulty"),
+    ("اختناق", "choking"),
+    ("شلل", "paralysis"),
+    ("تشنج", "seizure"),
+    ("اغماء", "fainting"),
+    ("نزيف", "bleeding"),
+    ("حرق", "burn"),
+    ("كسر مفتوح", "open_fracture"),
+    ("الم شديد", "severe_pain"),
+    ("صداع شديد", "severe_headache"),
+    ("حمى عاليه", "high_fever"),
+    ("سكري مرتفع", "high_glucose"),
+    ("ضغط عالي", "high_blood_pressure"),
+)
+
+
+def _phrase_is_negated(text: str, phrase_start: int) -> bool:
+    """Detect common Arabic negation immediately before a symptom phrase."""
+    prefix = text[max(0, phrase_start - 60):phrase_start].strip()
+    pattern = (
+        r"(?:بدون|من غير|لا يوجد|لا يوجد عندي|ما في|ما عندي|"
+        r"مش موجود|مش عندي|لا اعاني من)"
+        r"(?:\s+\S+){0,2}\s*$"
+    )
+    return bool(re.search(pattern, prefix))
+
+
+def _contains_non_negated(text: str, phrase: str) -> bool:
+    search_start = 0
+    while True:
+        phrase_start = text.find(phrase, search_start)
+        if phrase_start == -1:
+            return False
+        if not _phrase_is_negated(text, phrase_start):
+            return True
+        search_start = phrase_start + len(phrase)
+
+
+def detect_red_flags(raw_text: str) -> list[str]:
+    """Return distinct, non-negated red flags found in the complaint."""
+    text = normalize(raw_text or "")
+    found: list[str] = []
+    for phrase, label in RED_FLAG_PATTERNS:
+        if _contains_non_negated(text, phrase) and label not in found:
+            found.append(label)
+    return found
 
 
 @dataclass
@@ -113,16 +166,13 @@ def _complaint_score(data: dict) -> float:
         base = 0.2
 
     text = normalize(raw)
-    red_flags = [
-        "وجع صدر", "الم صدر", "ضغط على الصدر", "ضيق نفس", "اختناق",
-        "شلل", "تشنج", "اغماء", "نزيف", "حرق", "كسر مفتوح",
-        "الم شديد", "صداع شديد", "حمى عاليه", "سكري مرتفع", "ضغط عالي",
-    ]
-    moderate_flags = ["دوخه", "تنميل", "كسر", "قيء", "اسهال شديد", "التهاب", "الم"]
-
-    if any(flag in text for flag in red_flags):
+    if detect_red_flags(raw):
         return 1.0
-    if any(flag in text for flag in moderate_flags):
+
+    moderate_flags = [
+        "دوخه", "تنميل", "كسر", "قيء", "اسهال شديد", "التهاب", "الم"
+    ]
+    if any(_contains_non_negated(text, flag) for flag in moderate_flags):
         return max(base, 0.6)
     return base
 

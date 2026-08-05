@@ -43,6 +43,7 @@ multidict==6.7.1
 networkx==3.6.1
 numba==0.66.0
 numpy==2.4.6
+openai>=2.0.0,<3.0.0
 openai-whisper==20250625
 propcache==0.5.2
 proto-plus==1.28.0

@@ -6,6 +6,7 @@ Single entry point. Starts:
   3. Telegram bot (main thread, long-polling)
 """
 import asyncio
+import logging
 import threading
 import uvicorn
 from fastapi import FastAPI
@@ -15,11 +16,40 @@ from config import DASHBOARD_HOST, DASHBOARD_PORT, TELEGRAM_BOT_TOKEN
 from database.db import init_db
 from dashboard.routes import router as dashboard_router
 
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters,
+    CallbackQueryHandler, ContextTypes, filters,
 )
 from bot.router import route_text, route_voice, route_callback, route_start
+
+
+
+logger = logging.getLogger(__name__)
+
+
+async def telegram_error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Log unexpected Telegram errors without leaving them unhandled."""
+    error = context.error
+    if error is not None:
+        logger.error(
+            "Unhandled Telegram update error",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+    else:
+        logger.error("Unhandled Telegram update error without exception details")
+
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "صار خطأ تقني مؤقت، لكن البوت ما زال شغال. "
+                "جرب/ي إرسال الرسالة مرة ثانية أو ابدأ/ي حجزاً جديداً. 🙏"
+            )
+        except Exception:
+            logger.exception("Could not send Telegram error notice")
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -53,6 +83,7 @@ def build_bot() -> Application:
     app.add_handler(MessageHandler(filters.VOICE,                    route_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,  route_text))
     app.add_handler(CallbackQueryHandler(route_callback))
+    app.add_error_handler(telegram_error_handler)
 
     return app
 

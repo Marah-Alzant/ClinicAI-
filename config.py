@@ -23,8 +23,11 @@ TTS_RESPONSE_MODE = os.getenv("TTS_RESPONSE_MODE", "auto").strip().lower()
 if TTS_RESPONSE_MODE not in {"text", "voice", "both", "auto"}:
     TTS_RESPONSE_MODE = "auto"
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6").strip()
+LLM_TIMEOUT_SECONDS = _get_int_env("LLM_TIMEOUT_SECONDS", 20)
 
 CLINIC_NAME = os.getenv("CLINIC_NAME", "العيادة")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")

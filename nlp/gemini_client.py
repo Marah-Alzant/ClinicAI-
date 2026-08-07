@@ -12,11 +12,16 @@ import time
 
 import httpx
 
+from nlp.llm_provider import CallableProvider, LLMRouter, LocalFallbackProvider
+
 from config import (
     CLINIC_NAME,
     GEMINI_API_KEY,
     LLM_FALLBACK_MODEL,
     LLM_PRIMARY_MODEL,
+    LLM_TIMEOUT_SECONDS,
+    LLM_RETRIES,
+    LLM_LOCAL_FALLBACK_ENABLED,
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
 )
@@ -71,6 +76,26 @@ class GeminiClient:
         self._using_fallback = not bool(self._primary_model)
         self._primary_cooldown_until = 0.0
 
+        providers = [
+            CallableProvider(
+                "openrouter",
+                lambda prompt, max_tokens: self._generate_openrouter_sync(
+                    self._primary_model, prompt, max_tokens
+                ),
+                enabled=bool(self._primary_model),
+            ),
+            CallableProvider(
+                "gemini",
+                lambda prompt, max_tokens: self._generate_gemini_sync(
+                    self._fallback_model, prompt, max_tokens
+                ),
+                enabled=bool(self._fallback_model),
+            ),
+        ]
+        if LLM_LOCAL_FALLBACK_ENABLED:
+            providers.append(LocalFallbackProvider())
+        self._router = LLMRouter(providers, retries=LLM_RETRIES)
+
         if not OPENROUTER_AVAILABLE and self._primary_model:
             logger.info("OpenRouter disabled: OPENROUTER_API_KEY is not set in .env")
         if not GEMINI_AVAILABLE and LLM_FALLBACK_MODEL:
@@ -100,6 +125,7 @@ class GeminiClient:
             self._using_fallback = False
             self._model = self._primary_model
             self._primary_cooldown_until = 0.0
+
             logger.info("Restored primary LLM model: %s", self._primary_model)
 
     def _activate_fallback(self, reason: str) -> bool:
@@ -150,7 +176,7 @@ class GeminiClient:
             ],
             "max_tokens": max_tokens,
         }
-        with httpx.Client(timeout=60.0) as http:
+        with httpx.Client(timeout=LLM_TIMEOUT_SECONDS) as http:
             response = http.post(url, headers=headers, json=payload)
             if response.status_code == 429:
                 raise Exception(f"429 rate limit: {response.text[:200]}")
@@ -181,41 +207,45 @@ class GeminiClient:
         return self._generate_openrouter_sync(model, prompt, max_tokens)
 
     async def ask(self, prompt: str, max_tokens: int = 300) -> str:
-        if not self.is_ready or not self._model:
-            return ""
-
         self._maybe_restore_primary_model()
-        model = self._model
-        is_primary = model == self._primary_model
 
-        try:
-            return await asyncio.to_thread(self._generate_sync, model, prompt, max_tokens)
-        except Exception as exc:
-            if (
-                is_primary
-                and self._is_quota_error(exc)
-                and self._activate_fallback(str(exc)[:120])
-            ):
-                cooldown = self._cooldown_seconds(exc)
-                if cooldown:
-                    self._enter_primary_cooldown(cooldown, "API quota/rate limit")
+        models = []
+        if self._using_fallback and self._fallback_model:
+            models.append(self._fallback_model)
+        else:
+            if self._primary_model:
+                models.append(self._primary_model)
+            if self._fallback_model and self._fallback_model not in models:
+                models.append(self._fallback_model)
+
+        for model in models:
+            for attempt in range(LLM_RETRIES + 1):
                 try:
-                    return await asyncio.to_thread(
-                        self._generate_sync,
-                        self._fallback_model,
-                        prompt,
-                        max_tokens,
+                    result = await asyncio.to_thread(
+                        self._generate_sync, model, prompt, max_tokens
                     )
-                except Exception as fallback_exc:
-                    logger.warning("Fallback model ask failed: %s", fallback_exc)
-                    return ""
+                    if result:
+                        self._model = model
+                        self._using_fallback = model == self._fallback_model
+                        return result
+                    break
+                except Exception as exc:
+                    is_primary = model == self._primary_model
+                    logger.warning(
+                        "LLM model %s failed (attempt %s/%s): %s",
+                        model, attempt + 1, LLM_RETRIES + 1, exc
+                    )
+                    if is_primary:
+                        cooldown = self._cooldown_seconds(exc)
+                        if cooldown:
+                            self._enter_primary_cooldown(cooldown, "API quota/rate limit")
+                        self._activate_fallback(str(exc)[:120])
+                        if cooldown:
+                            break
 
-            cooldown = self._cooldown_seconds(exc)
-            if cooldown and is_primary:
-                self._enter_primary_cooldown(cooldown, "API quota/rate limit")
-            else:
-                logger.warning("LLM ask failed (%s): %s", model, exc)
+        if LLM_LOCAL_FALLBACK_ENABLED:
             return ""
+        return ""
 
     @staticmethod
     def looks_like_question(text: str) -> bool:

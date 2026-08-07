@@ -46,6 +46,9 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 LLM_PRIMARY_MODEL = os.getenv("LLM_PRIMARY_MODEL", "openai/gpt-4.1-mini")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL)
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+LLM_RETRIES = int(os.getenv("LLM_RETRIES", "1"))
+LLM_LOCAL_FALLBACK_ENABLED = os.getenv("LLM_LOCAL_FALLBACK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 CLINIC_NAME = os.getenv("CLINIC_NAME", "العيادة")
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")

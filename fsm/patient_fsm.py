@@ -494,8 +494,6 @@ class PatientFSM:
             return False
         if self.state == State.COLLECT_NAME and not self.data.get("name"):
             return True
-        if self.state == State.COLLECT_COMPLAINT and not self.data.get("complaint"):
-            return True
         if self.state == State.COLLECT_URGENCY and self.data.get("urgency_score") is None:
             return True
         if self.state == State.COLLECT_TIME and not self.data.get("time_pref"):
@@ -503,20 +501,22 @@ class PatientFSM:
         return False
 
     async def _extract_complaint_from_text(self, original_text: str) -> dict | None:
-        complaint = extract_patient_fields(original_text).get("complaint")
+        raw = (original_text or '').strip()
+        if not raw:
+            return None
+
+        complaint = extract_patient_fields(raw).get('complaint')
         if complaint:
+            complaint = dict(complaint)
+            complaint['raw'] = raw
             return complaint
 
-        if gemini.is_ready:
-            complaint_text = await gemini.extract_missing_field(original_text, "complaint")
-            if complaint_text:
-                return {
-                    "raw": complaint_text.strip(),
-                    "category": "general",
-                    "urgency_score": 0.3,
-                    "specialty": "general_practice",
-                }
-        return None
+        return {
+            'raw': raw,
+            'category': 'general',
+            'urgency_score': 0.3,
+            'specialty': 'general_practice',
+        }
 
     def _missing_fields(self) -> list[str]:
         missing = []
@@ -971,16 +971,6 @@ class PatientFSM:
             name = await gemini.extract_missing_field(text, "name")
             if name and not self._is_greeting_only(name):
                 self.data["name"] = name.strip()
-
-        if not self.data.get("complaint") and self.state in (State.GREETING, State.COLLECT_NAME, State.COLLECT_COMPLAINT):
-            complaint = await gemini.extract_missing_field(text, "complaint")
-            if complaint:
-                self.data["complaint"] = {
-                    "raw": complaint.strip(),
-                    "category": "general",
-                    "urgency_score": 0.3,
-                    "specialty": "general_practice",
-                }
 
         if not self.data.get("urgency_score") and self.state == State.COLLECT_URGENCY:
             urgency = await gemini.extract_missing_field(text, "urgency")

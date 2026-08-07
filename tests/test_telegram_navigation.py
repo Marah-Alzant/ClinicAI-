@@ -12,6 +12,7 @@ Uses the real rule-based classifier, OpenRouter/Gemma LLM (when API keys are set
 and TTS settings from config/.env — no mocks for those components.
 """
 from __future__ import annotations
+from datetime import datetime
 
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -80,7 +81,13 @@ class PreviewCollector:
             parts.append("=" * 80)
             parts.extend(lines)
             parts.append("")
-        path.write_text("\n".join(parts), encoding="utf-8")
+        payload = "\n".join(parts)
+        had_history = path.exists() and path.stat().st_size > 0
+        with path.open("a", encoding="utf-8") as fh:
+            if had_history:
+                fh.write("\n\n" + "#" * 100 + "\n\n")
+            fh.write(payload)
+            fh.write("\n")
 
 
 @pytest.fixture(scope="session")
@@ -200,7 +207,7 @@ def nav_db_factory(preview_collector):
             clinic_code="NAV-GP",
             clinic_name="عيادة عامة — اختبار",
         )
-        day1 = (utcnow() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+        day1 = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
         day1_alt = day1.replace(hour=14, minute=0)
         day2 = (utcnow() + timedelta(days=2)).replace(hour=11, minute=0, second=0, microsecond=0)
 
@@ -239,8 +246,7 @@ def nav_db_factory(preview_collector):
 
 
 def _send_name(sim: ChatSimulator, name: str) -> None:
-    """GREETING → COLLECT_NAME needs two turns before the name is stored."""
-    sim.send_text(name)
+    """Booking starts in COLLECT_NAME, so the patient sends the name once."""
     sim.send_text(name)
 
 
@@ -326,7 +332,7 @@ def test_scenario_edit_appointment_time(nav_db_factory):
 
 
 def test_scenario_next_slot_button(nav_db_factory):
-    day1 = (utcnow() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+    day1 = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
     day1_late = day1.replace(hour=15, minute=0)
     ctx = nav_db_factory("حجز → 🔄 موعد آخر (عدة slots)", extra_slots=[day1_late])
     sim = ctx["sim"]

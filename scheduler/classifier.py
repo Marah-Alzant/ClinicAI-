@@ -191,6 +191,9 @@ ROUTING_RULES: list[tuple[str, str]] = [
     ),
 ]
 
+# Normalize regex patterns with the same Arabic normalization used for patient input.
+ROUTING_RULES = [(normalize(pattern), specialty) for pattern, specialty in ROUTING_RULES]
+
 # ── Human-readable Arabic specialty names ─────────────────────────────────────
 SPECIALTY_NAMES_AR = {
     # "cardiology":        "القلب والأوعية",

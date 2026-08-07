@@ -628,4 +628,4 @@ def test_confirm_decline_cancels():
 
     reply, _ = unpack_fsm(run_async(fsm.handle("ما بدي اشي")))
     assert fsm.state == State.CANCELLED
-    assert "ألغيت" in reply
+    assert "\u0625\u0644\u063a\u0627\u0621" in reply or "\u0623\u0644\u063a\u064a\u062a" in reply

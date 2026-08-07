@@ -6,6 +6,8 @@ Patient appointment booking FSM:
 """
 from __future__ import annotations
 
+from utils.datetime_utils import utcnow
+
 import logging
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -596,6 +598,13 @@ class PatientFSM:
         return await self._score_and_find_slot()
 
     async def _score_and_find_slot(self) -> tuple[str, UIAction, dict]:
+        specialty_key = self.data.get("specialty_hint", "general_practice")
+        if specialty_key != "general_practice" and not self._specialty_available(specialty_key):
+            label = self.data.get("specialty_ar") or SPECIALTY_NAMES_AR.get(specialty_key, specialty_key)
+            self.data["unsupported_clinic_label"] = label
+            self.state = State.OFFER_GP_FALLBACK
+            return self._reply(self._gp_fallback_message(label), UIAction.SHOW_CONFIRM)
+
         self.priority = self.services.score(self.data)
         self.data["priority_class"] = self.priority.priority_class
         self.data["priority_score"] = self.priority.score
@@ -620,6 +629,9 @@ class PatientFSM:
                 telegram_id=self.user_id,
                 limit=3,
             )
+            rejected = set(self.data.get("rejected_slot_ids") or [])
+            if rejected:
+                slots = [slot for slot in slots if slot.slot_id not in rejected]
             if slots:
                 self.slot_options = [self._slot_to_dict(slot) for slot in slots]
                 self.slot_index = 0
@@ -641,13 +653,20 @@ class PatientFSM:
         norm = normalize(text)
         await self._reload_slot_options_if_needed()
 
+        requested_time = self._parse_requested_time(norm)
+        if requested_time:
+            return await self._offer_alternative_slot(requested_time)
+
         if _looks_like_decline(norm):
             self.state = State.CANCELLED
-            return self._reply("تمام، ما في مشكلة — ألغيت الحجز. إذا احتجت شي لاحقاً أنا هون. 👋", UIAction.NONE)
+            return self._reply("تمام، ما في مشكلة — تم الإلغاء. إذا احتجت شي لاحقاً أنا هون. 👋", UIAction.NONE)
 
         if _looks_like_soft_confirm(norm):
             result = await self._finalize()
             if result.get("slot_conflict"):
+                rejected = self.data.setdefault("rejected_slot_ids", [])
+                if self.slot and self.slot.get("slot_id") not in rejected:
+                    rejected.append(self.slot["slot_id"])
                 self.slot = None
                 self.state = State.FIND_SLOT
                 prefix = "للأسف الموعد انحجز قبل التأكيد بثواني. رح أبحث لك عن أقرب موعد بديل الآن.\n\n"
@@ -1215,6 +1234,17 @@ class PatientFSM:
                 if name:
                     self.data["name"] = name
 
+    def _specialty_available(self, specialty_key: str) -> bool:
+        from database.db import get_db
+        from database import crud
+
+        try:
+            with get_db() as db:
+                return specialty_key in crud.get_available_specialties(db)
+        except Exception as exc:
+            logger.warning("Specialty availability lookup failed: %s", exc)
+            return True
+
     def _gp_fallback_message(self, label: str) -> str:
         return (
             f"عذراً، {label} غير متوفرة لدينا حالياً.\n"
@@ -1268,6 +1298,64 @@ class PatientFSM:
             "أنت فهمت", "انت فهمت", "ماذا فهمت", "إيه اللي فهمته", "ايش فهمت",
             "أشرح", "اشرح", "what did you understand", "what do you know",
         ])
+
+    def _parse_requested_time(self, text: str) -> dict | None:
+        import re
+        raw = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+        match = re.search(r"(?<!\d)(\d{1,2})(?::(\d{1,2}))?(?!\d)", raw)
+        if not match:
+            return None
+        hour = int(match.group(1))
+        minute = int(match.group(2) or 0)
+        if any(token in raw for token in ("ونص", "و نص", "والنص")):
+            minute = 30
+        elif any(token in raw for token in ("وربع", "و ربع")):
+            minute = 15
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        if hour <= 7:
+            hour += 12
+        return {"hour": hour, "minute": minute}
+
+    async def _offer_alternative_slot(self, requested_time: dict) -> tuple[str, UIAction, dict]:
+        from database.db import get_db
+        from database import crud
+
+        old_slot = self.slot
+        rejected = self.data.setdefault("rejected_slot_ids", [])
+        if old_slot and old_slot.get("slot_id") not in rejected:
+            rejected.append(old_slot["slot_id"])
+
+        new_slot = None
+        with get_db() as db:
+            candidate = crud.find_alternative_slot(
+                db,
+                specialty=self.data.get("specialty_hint", "general_practice"),
+                priority_class=self.data.get("priority_class", "P3"),
+                preferred_date=(self.data.get("time_pref") or {}).get("date"),
+                preferred_hour=requested_time.get("hour"),
+                preferred_minute=requested_time.get("minute", 0),
+                exclude_slot_ids=rejected,
+                telegram_id=self.user_id,
+                doctor_id=(old_slot or {}).get("doctor_id"),
+            )
+            if candidate is not None:
+                new_slot = self._slot_to_dict(candidate)
+
+        self.state = State.CONFIRM
+        if new_slot is None:
+            if old_slot and old_slot.get("slot_id") in rejected:
+                rejected.remove(old_slot["slot_id"])
+            self.slot = old_slot
+            reply, action, payload = self._format_confirm_message()
+            return self._reply("ما لقيت موعد ثاني قريب بالوقت اللي طلبته. بخلي الموعد الحالي معروض لك.\n\n" + reply, action, payload)
+
+        self.slot_options = [new_slot]
+        self.slot_index = 0
+        self.slot = new_slot
+        reply, action, payload = self._format_confirm_message()
+        return self._reply("تمام، لقيت لك موعد بديل بنفس العيادة والطبيب.\n\n" + reply, action, payload)
+
 
     def _is_new_booking_request(self, text: str) -> bool:
         lowered = (text or "").lower().strip()

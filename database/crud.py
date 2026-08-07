@@ -5,7 +5,6 @@ from uuid import uuid4
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.orm import Session, joinedload
 from utils.datetime_utils import utcnow
-from utils.datetime_utils import utcnow
 from .models import (
     Patient,
     Doctor,
@@ -511,64 +510,101 @@ def find_available_slots(
     return results
 
 
+def get_active_doctor_for_specialty(db: Session, specialty: str):
+    """Return the first active doctor/clinic for the requested specialty."""
+    return db.scalar(
+        select(Doctor)
+        .where(Doctor.specialty == specialty, Doctor.is_active.is_(True))
+        .order_by(Doctor.doctor_id)
+        .limit(1)
+    )
+
+
+def _parse_requested_date(value: str | date | datetime | None) -> date | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+
+
+def find_slot_offer(
+    db: Session,
+    specialty: str,
+    priority_class: str,
+    preferred_date: str | date | datetime | None = None,
+    patient_id: int | None = None,
+    telegram_id: int | None = None,
+    doctor_id: int | None = None,
+) -> dict:
+    """Find the requested-day slot first; otherwise return an explicit later alternative."""
+    patient_id = patient_id or (_patient_id_for_telegram(db, telegram_id) if telegram_id else None)
+    requested_day = _parse_requested_date(preferred_date)
+    requested_iso = requested_day.isoformat() if requested_day else None
+
+    target_doctor_id = doctor_id
+    if target_doctor_id is None:
+        doctor = get_active_doctor_for_specialty(db, specialty)
+        target_doctor_id = doctor.doctor_id if doctor else None
+
+    if target_doctor_id is None:
+        return {"slot": None, "requested_date": requested_iso, "matched_requested_date": False, "is_alternative": False, "reason": "specialty_unavailable"}
+
+    if requested_day is not None:
+        exact = find_available_slots(
+            db, specialty, priority_class, preferred_date=requested_iso,
+            patient_id=patient_id, doctor_id=target_doctor_id, limit=1,
+        )
+        if exact:
+            return {"slot": exact[0], "requested_date": requested_iso, "matched_requested_date": True, "is_alternative": False, "reason": None}
+
+        candidates = find_available_slots(
+            db, specialty, priority_class, patient_id=patient_id,
+            doctor_id=target_doctor_id, limit=50,
+        )
+        alternative = next((slot for slot in candidates if slot.slot_datetime.date() > requested_day), None)
+        return {
+            "slot": alternative,
+            "requested_date": requested_iso,
+            "matched_requested_date": False,
+            "is_alternative": alternative is not None,
+            "reason": "no_slot_on_requested_date" if alternative else "no_slot_available_after_requested_date",
+        }
+
+    slots = find_available_slots(
+        db, specialty, priority_class, patient_id=patient_id,
+        doctor_id=target_doctor_id, limit=1,
+    )
+    slot = slots[0] if slots else None
+    return {"slot": slot, "requested_date": None, "matched_requested_date": False, "is_alternative": False, "reason": None if slot else "no_slot_available"}
+
+
 def find_next_available_slot(
     db: Session,
     specialty: str,
     priority_class: str,
-    preferred_date: str | None = None,
+    preferred_date: str | date | datetime | None = None,
     patient_id: int | None = None,
     telegram_id: int | None = None,
     doctor_id: int | None = None,
 ):
-    """
-    Read-only lookup used by FSM preview.
-    The final booking re-checks the slot and patient conflicts inside reserve_slot_and_create_appointment().
-    """
-    from config import USE_SLOT_POLICY
-
-    patient_id = patient_id or (_patient_id_for_telegram(db, telegram_id) if telegram_id else None)
-
-    if USE_SLOT_POLICY:
-        from scheduler.slot_policy import select_best_slot
-
-        return select_best_slot(
-            db,
-            specialty=specialty,
-            priority_class=priority_class,
-            preferred_date=preferred_date,
-            patient_id=patient_id,
-            doctor_id=doctor_id,
-            conflict_checker=_slot_conflicts_with_patient,
-        )
-
-    # P1 should get the earliest safe slot; P2/P3 first try user's preferred date.
-    if priority_class != "P1" and preferred_date:
-        slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class, preferred_date, doctor_id=doctor_id), patient_id)
-        if slot:
-            return slot
-
-    slot = _first_slot_without_patient_conflict(db, _slot_query(specialty, priority_class, doctor_id=doctor_id), patient_id)
-    if slot:
-        return slot
-
-    # If specialty-specific capacity is full, allow general-practice fallback.
-    if specialty != "general_practice":
-        if priority_class != "P1" and preferred_date:
-            slot = _first_slot_without_patient_conflict(
-                db,
-                _slot_query(specialty, priority_class, preferred_date, allow_general_fallback=True, doctor_id=doctor_id),
-                patient_id,
-            )
-            if slot:
-                return slot
-        return _first_slot_without_patient_conflict(
-            db,
-            _slot_query(specialty, priority_class, allow_general_fallback=True, doctor_id=doctor_id),
-            patient_id,
-        )
-
-    return None
-
+    """Backward-compatible Slot-only wrapper around find_slot_offer()."""
+    return find_slot_offer(
+        db=db, specialty=specialty, priority_class=priority_class,
+        preferred_date=preferred_date, patient_id=patient_id,
+        telegram_id=telegram_id, doctor_id=doctor_id,
+    ).get("slot")
 
 def create_patient_file(db: Session, patient: Patient, data: dict) -> PatientProfile:
     profile_payload = _build_patient_profile_payload(data)
@@ -576,61 +612,65 @@ def create_patient_file(db: Session, patient: Patient, data: dict) -> PatientPro
 
 
 def reserve_slot_and_create_appointment(db: Session, data: dict, slot_id: int | None, patient: Patient):
-    """
-    Atomic booking step:
-      1) re-read the slot from DB
-      2) verify it is still available
-      3) block duplicate/overlapping active bookings for this patient
-      4) create appointment
-      5) mark slot as booked
-    """
-    slot = None
-    if slot_id is not None:
-        slot = db.scalar(
-            select(Slot)
-            .options(joinedload(Slot.doctor))
-            .where(Slot.slot_id == slot_id)
+    """Atomically reserve a valid doctor-owned slot and create its appointment."""
+    requested_specialty = data.get("specialty_hint") or data.get("specialty") or "general_practice"
+    expected_doctor_id = data.get("doctor_id")
+
+    if slot_id is None:
+        appointment = Appointment(
+            appt_id=_ensure_appt_id(data), patient_id=patient.patient_id,
+            slot_id=None, appt_datetime=None, specialty=requested_specialty,
+            specialty_ar=data.get("specialty_ar"), priority_class=data.get("priority_class"),
+            priority_score=data.get("priority_score"), complaint_summary=_complaint_raw(data),
+            time_preference=data.get("time_pref"), status="waitlisted", updated_at=utcnow(),
         )
-        if slot is None or slot.status != "available" or slot.doctor is None or not slot.doctor.is_active:
+        db.add(appointment)
+        db.flush()
+        db.refresh(appointment)
+        return {"appointment": appointment, "slot_conflict": False, "booking_conflict": None}
+
+    slot = db.scalar(select(Slot).options(joinedload(Slot.doctor)).where(Slot.slot_id == slot_id))
+    if slot is None or slot.status != "available" or slot.doctor is None or not slot.doctor.is_active:
+        return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
+
+    if expected_doctor_id is not None:
+        try:
+            expected_doctor_id = int(expected_doctor_id)
+        except (TypeError, ValueError):
+            return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
+        if slot.doctor_id != expected_doctor_id:
             return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
 
-        patient_priority = data.get("priority_class")
-        if slot.priority_class not in set(_allowed_slot_priorities(patient_priority)):
-            return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
+    if slot.doctor.specialty != requested_specialty:
+        return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
 
-    appt_datetime = slot.slot_datetime if slot else None
-    requested_specialty = data.get("specialty_hint") or data.get("specialty")
-    specialty = slot.doctor.specialty if slot and slot.doctor else requested_specialty
+    patient_priority = data.get("priority_class")
+    if slot.priority_class not in set(_allowed_slot_priorities(patient_priority)):
+        return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
 
-    if slot is not None:
-        conflict = find_patient_booking_conflict(db, patient.patient_id, appt_datetime, specialty)
-        if conflict:
-            return {"appointment": None, "slot_conflict": False, "booking_conflict": conflict}
+    conflict = find_patient_booking_conflict(db, patient.patient_id, slot.slot_datetime, slot.doctor.specialty)
+    if conflict:
+        return {"appointment": None, "slot_conflict": False, "booking_conflict": conflict}
 
-    status = "confirmed" if appt_datetime else "waitlisted"
-    appointment = Appointment(
-        appt_id=_ensure_appt_id(data),
-        patient_id=patient.patient_id,
-        slot_id=slot.slot_id if slot else None,
-        appt_datetime=appt_datetime,
-        specialty=specialty,
-        specialty_ar=data.get("specialty_ar"),
-        priority_class=data.get("priority_class"),
-        priority_score=data.get("priority_score"),
-        complaint_summary=_complaint_raw(data),
-        time_preference=data.get("time_pref"),
-        status=status,
-        updated_at=utcnow(),
+    slot_datetime = slot.slot_datetime
+    slot_specialty = slot.doctor.specialty
+    updated_rows = db.query(Slot).filter(Slot.slot_id == slot_id, Slot.status == "available").update(
+        {Slot.status: "booked", Slot.updated_at: utcnow()}, synchronize_session="fetch"
     )
-    if slot is not None and appt_datetime is not None:
-        slot.status = "booked"
-        slot.updated_at = utcnow()
-        db.add(slot)
+    if updated_rows != 1:
+        return {"appointment": None, "slot_conflict": True, "booking_conflict": None}
+
+    appointment = Appointment(
+        appt_id=_ensure_appt_id(data), patient_id=patient.patient_id,
+        slot_id=slot_id, appt_datetime=slot_datetime, specialty=slot_specialty,
+        specialty_ar=data.get("specialty_ar"), priority_class=data.get("priority_class"),
+        priority_score=data.get("priority_score"), complaint_summary=_complaint_raw(data),
+        time_preference=data.get("time_pref"), status="confirmed", updated_at=utcnow(),
+    )
     db.add(appointment)
     db.flush()
     db.refresh(appointment)
     return {"appointment": appointment, "slot_conflict": False, "booking_conflict": None}
-
 
 def create_patient_file_and_book(db: Session, telegram_id: int, data: dict, slot_id: int | None):
     """
@@ -1086,6 +1126,59 @@ def delete_profile(db: Session, telegram_id: int) -> bool:
 # ── FSM session persistence ───────────────────────────────────────────────────
 
 FSM_SESSION_TTL_HOURS = 24
+
+
+def get_available_specialties(db: Session) -> set[str]:
+    """Return specialties backed by at least one active doctor/clinic."""
+    rows = db.scalars(
+        select(Doctor.specialty).where(Doctor.is_active.is_(True)).distinct()
+    ).all()
+    return {row for row in rows if row}
+
+
+def find_alternative_slot(
+    db: Session,
+    specialty: str,
+    priority_class: str,
+    preferred_date: str | None = None,
+    preferred_hour: int | None = None,
+    preferred_minute: int = 0,
+    exclude_slot_ids: list[int] | None = None,
+    telegram_id: int | None = None,
+    doctor_id: int | None = None,
+):
+    """Find another slot for the same specialty/doctor without silent fallback."""
+    exclude = set(exclude_slot_ids or [])
+    patient_id = _patient_id_for_telegram(db, telegram_id) if telegram_id else None
+
+    target_doctor_id = doctor_id
+    if target_doctor_id is None:
+        doctor = get_active_doctor_for_specialty(db, specialty)
+        target_doctor_id = doctor.doctor_id if doctor else None
+    if target_doctor_id is None:
+        return None
+
+    def _pick(date_filter: str | None):
+        slots = find_available_slots(
+            db,
+            specialty,
+            priority_class,
+            preferred_date=date_filter,
+            patient_id=patient_id,
+            doctor_id=target_doctor_id,
+            limit=80,
+        )
+        slots = [slot for slot in slots if slot.slot_id not in exclude and slot.doctor_id == target_doctor_id]
+        if preferred_hour is not None:
+            target_minutes = preferred_hour * 60 + (preferred_minute or 0)
+            slots.sort(key=lambda slot: (abs(slot.slot_datetime.hour * 60 + slot.slot_datetime.minute - target_minutes), slot.slot_datetime))
+        return slots[0] if slots else None
+
+    if preferred_date:
+        slot = _pick(preferred_date)
+        if slot is not None:
+            return slot
+    return _pick(None)
 
 
 def cleanup_stale_fsm_sessions(db: Session, *, ttl_hours: int = FSM_SESSION_TTL_HOURS) -> int:
